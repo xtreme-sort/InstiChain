@@ -12,3 +12,4 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "InstiChain API"
+    database_url: str = "postgresql+psycopg://instichain:instichain@127.0.0.1:5432/instichain"
