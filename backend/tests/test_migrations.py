@@ -110,6 +110,11 @@ class MigrationTests(unittest.TestCase):
             with self.subTest(email=email):
                 self.reject(User.__table__.insert().values(email=email, display_name="Duplicate"), constraint)
 
+    def test_verification_upgrade_preserves_existing_users(self):
+        command.downgrade(self.config, "0001")
+        command.upgrade(self.config, "head")
+        self.assertEqual(self.connection.scalar(select(User.id).where(User.id == self.student)), self.student)
+
     def test_appointment_term_position_and_revocation_reference(self):
         values = dict(
             club_id=self.club, user_id=self.student, position="club_head", granted_by_id=self.actor,

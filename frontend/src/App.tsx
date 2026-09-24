@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link2, RefreshCw } from 'lucide-react'
+import EmailVerification from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
 
@@ -45,7 +46,8 @@ export default function App() {
         <span className="version">0.1.0</span>
       </header>
       <main>
-        <h1>Service status</h1>
+        <EmailVerification />
+        <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>
           <span className={`status ${connection}`} role="status">
