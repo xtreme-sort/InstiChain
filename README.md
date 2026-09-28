@@ -46,6 +46,41 @@ frontend/
 
 ## Backend Setup
 
+### Start and Stop Commands (Linux/WSL)
+
+After installing dependencies, run these from the repository root in two separate
+terminals:
+
+```bash
+make backend
+```
+
+```bash
+make frontend
+```
+
+Each command stops existing servers for that service in this checkout, then
+starts a fresh foreground server. The backend runs at <http://127.0.0.1:8000>
+with reload enabled; the frontend runs at <http://127.0.0.1:5173>.
+Use `Ctrl+C` in the terminal to stop its server, or run:
+
+```bash
+make stop           # Stop both app servers
+make stop-backend   # Stop only the backend
+make stop-frontend  # Stop only the frontend
+make status        # Show project server PIDs
+```
+
+You can also run `bash scripts/backend.sh start` or
+`bash scripts/frontend.sh start` directly. Both scripts accept `stop` and `status`.
+They identify same-user Vite/Uvicorn processes by this checkout's working directory,
+including servers started manually, and stop their child processes. Unrelated
+processes occupying the ports are left alone and cause startup to fail clearly.
+PostgreSQL and Mailpit containers are not stopped or restarted. These commands do
+not install dependencies, apply migrations or bootstrap an administrator.
+
+### Manual Setup
+
 From the repository root, in the first terminal:
 
 ```bash
