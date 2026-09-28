@@ -1,5 +1,4 @@
 # Local plan and configuration
-/IMPLEMENTATION_PLAN.md
 .env
 .env.*
 !.env.example
