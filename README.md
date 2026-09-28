@@ -198,6 +198,16 @@ Before public deployment, add a reverse-proxy/IP request limit as well as the
 per-address limits. Retain token rows for at least 24 hours to preserve those
 limits; expired older rows can be removed by a future retention job.
 
+## Administrator Setup
+
+Administrator bootstrap, club creation and advisor onboarding are available after
+migration `0004`. Follow [administrator and integration setup](backend/ADMIN_SETUP.md)
+for the controlled bootstrap command, signing-key preparation, institutional
+verification, SMTP delivery checks and read-only Google Drive access probe.
+
+No account is promoted by signup. Private keys stay outside Git. Real SMTP inbox
+delivery and Drive test-account access require your own provider configuration.
+
 ## Configuration
 
 | File | Variable | Default | Purpose |

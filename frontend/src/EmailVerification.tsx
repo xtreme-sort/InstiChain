@@ -101,7 +101,7 @@ export default function EmailVerification({ account, onSignedIn, onSignedOut }: 
       <CheckCircle2 size={32} className="connected" aria-hidden="true" />
       <h1 id="account-title">Signed in</h1>
       <p role="status">Signed in as {account.display_name} ({account.email}).</p>
-      <button type="button" onClick={() => void logout()} disabled={pending}>
+      <button className="account-logout" type="button" onClick={() => void logout()} disabled={pending}>
         <LogOut size={18} aria-hidden="true" />
         Log out
       </button>

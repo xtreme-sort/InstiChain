@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: SecretStr | None = None
     smtp_from: str = "InstiChain <no-reply@instichain.local>"
+    admin_signing_key_file: Path | None = None
+    drive_test_access_token: SecretStr | None = None
+    drive_test_file_id: str | None = None
 
     @field_validator("public_app_url")
     @classmethod

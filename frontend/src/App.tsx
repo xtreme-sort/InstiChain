@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link2, RefreshCw } from 'lucide-react'
 import EmailVerification from './EmailVerification'
+import AdminPanel from './AdminPanel'
 import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
@@ -70,6 +71,7 @@ export default function App() {
         {sessionChecked && (
           <EmailVerification account={account} onSignedIn={setAccount} onSignedOut={() => setAccount(null)} />
         )}
+        {account && <AdminPanel key={account.id} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>

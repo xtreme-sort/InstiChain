@@ -73,8 +73,30 @@ button {
 button:hover { background: #edf2ef; }
 button:focus-visible { outline: 2px solid #166c52; outline-offset: 3px; }
 button:disabled { opacity: 0.5; cursor: wait; }
+.account-logout { width: auto; display: flex; gap: 8px; padding: 0 12px; }
+.administration { margin-top: 40px; border-top: 1px solid #dce3df; }
+.admin-forms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+.administration h3 { font-size: 17px; margin: 20px 0; }
+.administration h4 { font-size: 16px; margin: 0; }
+.administration fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 16px; min-width: 0; }
+.administration label { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
+.administration input, .administration select, .administration textarea {
+  width: 100%; min-width: 0; min-height: 42px; padding: 10px;
+  border: 1px solid #b6c4bc; border-radius: 6px; font: inherit; background: white;
+}
+.administration textarea { resize: vertical; }
+.administration :is(input, select, textarea):focus-visible { outline: 2px solid #166c52; outline-offset: 2px; }
+.administration p, .advisor-row { overflow-wrap: anywhere; line-height: 1.5; font-size: 14px; }
+.club-list { list-style: none; margin: 0; padding: 0; }
+.club-list > li { padding: 20px 0; border-top: 1px solid #dce3df; }
+.club-slug { color: #67716c; margin: 4px 0; }
+.advisor-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; margin-top: 14px; }
+@media (max-width: 600px) {
+  .admin-forms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .advisor-row { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 420px) {
   .service { grid-template-columns: minmax(0, 1fr) 36px; }
   .status { grid-column: 1; grid-row: 2; }
-  button { grid-column: 2; grid-row: 1 / 3; }
+  .service button { grid-column: 2; grid-row: 1 / 3; }
 }

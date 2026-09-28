@@ -9,6 +9,8 @@ keys do not cascade deletes, preserving references to historical records.
 | `users` | Stable UUID identity, unique normalized email, display name and optional email verification timestamp. No elevated role is granted by this table. |
 | `email_verifications` | Added by `0002`: email, unique SHA-256 token hash, creation/expiry timestamps and consumed/invalidated timestamps. No user is created until confirmation. |
 | `sessions` | Added by `0003`: user, unique SHA-256 session-token hash, creation/expiry timestamps and an optional revocation timestamp. Confirming an email verification or login link creates one. |
+| `administrator` | Added by `0004`: one operator-bootstrapped administrator, server signing-key reference, bootstrap transaction and optional revocation time. No web promotion endpoint exists. |
+| `authority_keys` | Added by `0004`: public Ed25519 keys, owner, purpose, institutional verification reference, verifier and revocation time. Private keys are never stored here. |
 | `clubs` | Unique slug, name, description and the user who created the club. |
 | `appointments` | Club, appointed user, grantor, position, start/end times and grant/revocation ledger references. Supports faculty advisors, heads and office bearers. |
 | `competitions` | Owning club, creator, title, description and scheduled start/end times. |
@@ -30,7 +32,7 @@ keys do not cascade deletes, preserving references to historical records.
 - Hashes use 64 lowercase hexadecimal characters; signatures use 64 raw bytes. This
   also covers session tokens: only their SHA-256 hashes are stored, matching email
   verification tokens.
-- Ledger sequence numbers are supplied by the future serialized writer. The first
+- Ledger sequence numbers are supplied by the serialized admin writer. The first
   entry has a null previous hash; later entries require a previous hash.
 - A trigger rejects ledger UPDATE, DELETE and TRUNCATE statements. A migration
   owner can still drop the table or disable its trigger; this is not protection
@@ -38,17 +40,22 @@ keys do not cascade deletes, preserving references to historical records.
 
 ## Deliberately Deferred
 
-Email verification is implemented, but issuance and club authorization are not.
-The database checks references and field shapes, but does not yet verify
-signatures, recompute hashes, enforce gap-free ledger order or validate that
-each referenced event authorizes its associated row. The serialized writer will
-perform those checks and update projections atomically in a later milestone.
+Email verification, sessions and administrator authorization are implemented.
+Bootstrap, club creation and advisor appointments append server-signed Ed25519
+events in the same transaction as their records. A shared PostgreSQL advisory
+lock serializes writes. The signature covers the RFC 8785 canonical action
+envelope; the entry hash additionally covers sequence, signature, UTC commit time
+and previous hash. Full ledger replay, audit verification and advisor-signed
+credential issuance remain future milestones. Direct SQL writes do not run the
+writer's checks. The operating server and initial administrator are trust anchors.
 
-`actor_key_id` and `result_id` are opaque UUIDs for now; key registration and
-versioned result submissions will introduce their owning tables and migrations.
+New admin events bind `actor_key_id` to `authority_keys`; existing ledger rows
+remain unchanged and no foreign key is retroactively imposed. `result_id` remains
+opaque pending versioned result submissions. Advisor appointments now include
+an advisor-key foreign key and a private institutional verification reference.
 No passwords, private keys, OAuth tokens or public proof URLs belong in the
-ledger. Public key history, checkpoints, storage references, share permissions
-and bootstrap administrator authorization are future modules.
+ledger. Key rotation/recovery workflows, checkpoints, storage references and
+share permissions remain future modules.
 
 Appointments and credentials are current-state projection tables. Their mutable
 revocation/replacement fields will be maintained from immutable ledger events.

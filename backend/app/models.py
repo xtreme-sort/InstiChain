@@ -57,6 +57,36 @@ class Session(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AuthorityKey(Base):
+    __tablename__ = "authority_keys"
+    __table_args__ = (
+        CheckConstraint("octet_length(public_key) = 32", name="public_key_length"),
+        CheckConstraint("purpose IN ('administrator', 'advisor')", name="purpose"),
+        CheckConstraint("length(trim(verification_reference)) > 0", name="verification_reference"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    public_key: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    purpose: Mapped[str] = mapped_column(String(32))
+    verified_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    verification_reference: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Administrator(Base):
+    __tablename__ = "administrator"
+    __table_args__ = (CheckConstraint("id = 1", name="singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), unique=True)
+    key_id: Mapped[UUID] = mapped_column(ForeignKey("authority_keys.id"), unique=True)
+    bootstrap_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Club(Base):
     __tablename__ = "clubs"
     __table_args__ = (
@@ -126,6 +156,8 @@ class Appointment(Base):
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
     position: Mapped[str] = mapped_column(String(32))
     granted_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    advisor_key_id: Mapped[UUID | None] = mapped_column(ForeignKey("authority_keys.id"))
+    verification_reference: Mapped[str | None] = mapped_column(String(500))
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     grant_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
