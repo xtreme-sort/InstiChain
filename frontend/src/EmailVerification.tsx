@@ -31,9 +31,10 @@ type Props = {
   account: Account | null
   onSignedIn: (account: Account) => void
   onSignedOut: () => void
+  onLinkModeChange: (active: boolean) => void
 }
 
-export default function EmailVerification({ account, onSignedIn, onSignedOut }: Props) {
+export default function EmailVerification({ account, onSignedIn, onSignedOut, onLinkModeChange }: Props) {
   const [token, setToken] = useState(() => new URLSearchParams(window.location.hash.slice(1)).get('token') || '')
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -43,6 +44,10 @@ export default function EmailVerification({ account, onSignedIn, onSignedOut }: 
   const [resendAt, setResendAt] = useState(0)
   const [remaining, setRemaining] = useState(0)
   const [linkState, setLinkState] = useState<'checking' | 'register' | 'login' | 'invalid'>('checking')
+
+  useEffect(() => {
+    onLinkModeChange(Boolean(token))
+  }, [token, onLinkModeChange])
 
   useEffect(() => {
     function readLink() {

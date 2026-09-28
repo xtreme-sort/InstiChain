@@ -11,6 +11,9 @@ export default function App() {
   const [attempt, setAttempt] = useState(0)
   const [account, setAccount] = useState<Account | null>(null)
   const [sessionChecked, setSessionChecked] = useState(false)
+  const [linkMode, setLinkMode] = useState(
+    () => Boolean(new URLSearchParams(window.location.hash.slice(1)).get('token')),
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -69,9 +72,10 @@ export default function App() {
       </header>
       <main>
         {sessionChecked && (
-          <EmailVerification account={account} onSignedIn={setAccount} onSignedOut={() => setAccount(null)} />
+          <EmailVerification account={account} onSignedIn={setAccount} onSignedOut={() => setAccount(null)}
+            onLinkModeChange={setLinkMode} />
         )}
-        {account && <AdminPanel key={account.id} />}
+        {account && !linkMode && <AdminPanel key={account.id} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>
