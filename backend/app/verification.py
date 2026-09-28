@@ -44,10 +44,17 @@ class VerificationRequest(BaseModel):
         return normalize_institute_email(value)
 
 
-class VerificationConfirm(BaseModel):
+class VerificationToken(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     token: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$", max_length=43)
-    display_name: str = Field(min_length=1, max_length=200)
+
+
+class VerificationConfirm(VerificationToken):
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class LinkResponse(BaseModel):
+    requires_name: bool
 
 
 class MessageResponse(BaseModel):
@@ -99,6 +106,21 @@ def request_verification(
     return MessageResponse(message=REQUEST_MESSAGE)
 
 
+@router.post("/inspect", response_model=LinkResponse)
+def inspect_verification(
+    body: VerificationToken, response: Response,
+    session: Annotated[Session, Depends(get_session)],
+) -> LinkResponse:
+    response.headers["Cache-Control"] = "no-store"
+    digest = hashlib.sha256(body.token.encode()).hexdigest()
+    record = session.scalar(select(EmailVerification).where(EmailVerification.token_hash == digest))
+    now = session.scalar(select(func.clock_timestamp()))
+    if record is None or record.consumed_at or record.invalidated_at or record.expires_at <= now:
+        raise HTTPException(400, INVALID_MESSAGE, headers={"Cache-Control": "no-store"})
+    verified = session.scalar(select(User.id).where(User.email == record.email, User.email_verified_at.is_not(None)))
+    return LinkResponse(requires_name=verified is None)
+
+
 @router.post("/confirm", response_model=MessageResponse)
 def confirm_verification(
     body: VerificationConfirm, response: Response,
@@ -117,6 +139,10 @@ def confirm_verification(
         if record is None or record.consumed_at or record.invalidated_at or record.expires_at <= now:
             raise HTTPException(400, INVALID_MESSAGE, headers={"Cache-Control": "no-store"})
         user = session.scalar(select(User).where(User.email == email).with_for_update())
+        requires_name = user is None or user.email_verified_at is None
+        if requires_name and body.display_name is None:
+            raise HTTPException(422, "Your full name is required to finish registration.",
+                                headers={"Cache-Control": "no-store"})
         if user is None:
             user = User(email=email, display_name=body.display_name, email_verified_at=now)
             session.add(user)
@@ -131,4 +157,4 @@ def confirm_verification(
         ).values(invalidated_at=now))
         token = create_session(session, user.id, settings)
     response.set_cookie(SESSION_COOKIE, token, max_age=settings.session_ttl_days * 86400, **cookie_kwargs(settings))
-    return MessageResponse(message="Your institute email is verified.")
+    return MessageResponse(message="Your institute email is verified." if requires_name else "You are signed in.")

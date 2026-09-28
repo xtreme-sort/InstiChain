@@ -115,6 +115,66 @@ class SessionTests(unittest.TestCase):
             record = session.scalar(select(Session))
             self.assertIsNotNone(record.revoked_at)
 
+    def test_registration_inspection_does_not_consume_link(self):
+        self.request()
+        token = self.sent[-1][1]
+        for _ in range(2):
+            response = self.client.post("/api/auth/email/inspect", json={"token": token})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"requires_name": True})
+            self.assertEqual(response.headers["cache-control"], "no-store")
+            self.assertNotIn(SESSION_COOKIE, response.cookies)
+        self.assertEqual(self.confirm(token).status_code, 200)
+        self.assertEqual(self.client.post("/api/auth/email/inspect", json={"token": token}).status_code, 400)
+
+    def test_new_account_requires_name_without_consuming_token(self):
+        self.request()
+        token = self.sent[-1][1]
+        response = self.client.post("/api/auth/email/confirm", json={"token": token})
+        self.assertEqual(response.status_code, 422)
+        with DbSession(self.engine) as session:
+            self.assertEqual(session.scalar(select(func.count()).select_from(User)), 0)
+            self.assertIsNone(session.scalar(select(EmailVerification.consumed_at)))
+        self.assertEqual(self.confirm(token).status_code, 200)
+
+    def test_returning_login_needs_no_name_and_preserves_identity(self):
+        self.request()
+        self.confirm(display_name="Arjun")
+        original = self.client.get("/api/auth/session").json()
+        self.client.post("/api/auth/logout")
+        self.age_requests()
+        self.request()
+        token = self.sent[-1][1]
+        response = self.client.post("/api/auth/email/inspect", json={"token": token})
+        self.assertEqual(response.json(), {"requires_name": False})
+        self.assertEqual(self.client.post("/api/auth/email/confirm", json={"token": token}).status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/session").json(), original)
+
+    def test_login_cannot_overwrite_saved_name(self):
+        self.request()
+        self.confirm(display_name="Arjun")
+        original = self.client.get("/api/auth/session").json()
+        self.client.post("/api/auth/logout")
+        self.age_requests()
+        self.request()
+        self.assertEqual(self.confirm(display_name="Rahul").status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/session").json(), original)
+
+    def test_inspection_rejects_expired_unknown_and_superseded_links(self):
+        self.request()
+        first = self.sent[-1][1]
+        self.age_requests()
+        self.request()
+        current = self.sent[-1][1]
+        with self.engine.begin() as connection:
+            connection.execute(update(EmailVerification).values(
+                created_at=func.now() - text("interval '20 minutes'"),
+                expires_at=func.now() - text("interval '1 second'"),
+            ))
+        for token in [first, current, "z" * 43]:
+            with self.subTest(token=token):
+                self.assertEqual(self.client.post("/api/auth/email/inspect", json={"token": token}).status_code, 400)
+
     def test_missing_or_unknown_cookie_is_unauthorized(self):
         self.assertEqual(self.client.get("/api/auth/session").status_code, 401)
         self.client.cookies.set(SESSION_COOKIE, "x" * 43)

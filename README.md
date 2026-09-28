@@ -182,9 +182,10 @@ new settings from `backend/.env.example` to your existing `.env` as needed.
 
 1. Open <http://127.0.0.1:5173> and enter an institute email.
 2. Open the local inbox at <http://127.0.0.1:8025> and follow the emailed link.
-3. First-time addresses enter their name and select **Verify email**; already
-   verified addresses are signed in immediately. Opening the link alone does not
-   consume it; confirmation requires a POST request.
+3. First-time addresses enter their name and select **Create account**. Returning
+   users see **Confirm sign-in** and select **Sign in**, with no name field.
+   Opening the link only checks its validity; it never consumes it or starts a
+   session without confirmation.
 4. Reloading the page keeps you signed in. Select **Log out** to end the session.
 
 There are no passwords anywhere in this design. Requesting a link for an
@@ -199,8 +200,13 @@ If the frontend port changes, update that URL too. Configure the deployed fronte
 to serve `index.html` for `/verify-email` so emailed deep links work.
 
 - `POST /api/auth/email/request` accepts `{"email":"student@smail.iitm.ac.in"}`.
+- `POST /api/auth/email/inspect` accepts `{"token":"<token from email>"}` and
+  returns `requires_name` for a valid link without consuming it or disclosing
+  profile data. Expired, used and invalidated links are rejected.
 - `POST /api/auth/email/confirm` accepts `{"token":"<token from email>","display_name":"Student Name"}`.
-  On success it verifies (or creates) the account and starts a session.
+  The name is required only for initial verification. Returning users submit only
+  `token`; their existing name and permanent user ID remain unchanged. On success
+  it verifies (or creates) the account and starts a session.
 - `GET /api/auth/session` returns the signed-in user (`401` if not signed in).
 - `POST /api/auth/logout` revokes the current session; safe to call without one.
 - Addresses must use `iitm.ac.in` or a proper subdomain such as `smail.iitm.ac.in`.
