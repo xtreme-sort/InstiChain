@@ -79,7 +79,10 @@ class VerificationTests(unittest.TestCase):
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
         self.sent = []
-        self.mail_patch = patch("app.verification.send_verification_email", side_effect=lambda email, token, settings: self.sent.append((email, token)))
+        self.mail_patch = patch(
+            "app.verification.send_verification_email",
+            side_effect=lambda email, token, settings, purpose="verify": self.sent.append((email, token, purpose)),
+        )
         self.sender = self.mail_patch.start()
         self.addCleanup(self.mail_patch.stop)
 
@@ -103,8 +106,9 @@ class VerificationTests(unittest.TestCase):
         response = self.request(" Student@SMAIL.IITM.AC.IN ")
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.headers["cache-control"], "no-store")
-        email, token = self.sent[0]
+        email, token, purpose = self.sent[0]
         self.assertEqual(email, "student@smail.iitm.ac.in")
+        self.assertEqual(purpose, "verify")
         self.assertNotIn(token, response.text)
         with Session(self.engine) as session:
             record = session.scalar(select(EmailVerification))
@@ -164,11 +168,14 @@ class VerificationTests(unittest.TestCase):
         with Session(self.engine) as session:
             self.assertEqual(session.scalar(select(func.count()).select_from(EmailVerification)), 1)
 
-    def test_existing_verified_account_is_not_changed_or_disclosed(self):
+    def test_existing_verified_account_gets_login_link_with_same_response(self):
         first = self.request()
         self.confirm()
-        self.assertEqual(self.request().json(), first.json())
-        self.assertEqual(len(self.sent), 1)
+        self.age_requests()
+        second = self.request()
+        self.assertEqual(second.json(), first.json())
+        self.assertEqual(len(self.sent), 2)
+        self.assertEqual(self.sent[-1][2], "login")
 
     def test_existing_unverified_account_keeps_its_id(self):
         user_id = uuid4()

@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link2, RefreshCw } from 'lucide-react'
 import EmailVerification from './EmailVerification'
+import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
 
 export default function App() {
   const [connection, setConnection] = useState<Connection>('checking')
   const [attempt, setAttempt] = useState(0)
+  const [account, setAccount] = useState<Account | null>(null)
+  const [sessionChecked, setSessionChecked] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -38,6 +41,24 @@ export default function App() {
     }
   }, [attempt])
 
+  useEffect(() => {
+    let active = true
+    async function restoreSession() {
+      try {
+        const response = await fetch('/api/auth/session', { signal: AbortSignal.timeout(5000) })
+        if (response.ok && active) setAccount((await response.json()) as Account)
+      } catch {
+        // No session to restore; the sign-in form is shown instead.
+      } finally {
+        if (active) setSessionChecked(true)
+      }
+    }
+    void restoreSession()
+    return () => {
+      active = false
+    }
+  }, [])
+
   return (
     <>
       <header className="header">
@@ -46,7 +67,9 @@ export default function App() {
         <span className="version">0.1.0</span>
       </header>
       <main>
-        <EmailVerification />
+        {sessionChecked && (
+          <EmailVerification account={account} onSignedIn={setAccount} onSignedOut={() => setAccount(null)} />
+        )}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>

@@ -14,6 +14,7 @@ from app.config import Settings
 from app.database import get_session
 from app.email_delivery import send_verification_email
 from app.models import EmailVerification, User
+from app.session import SESSION_COOKIE, cookie_kwargs, create_session
 
 router = APIRouter(prefix="/api/auth/email", tags=["email verification"])
 REQUEST_MESSAGE = "If this address needs verification, a link will be sent. Check your inbox."
@@ -78,7 +79,7 @@ def request_verification(
             EmailVerification.email == body.email,
             EmailVerification.created_at > now - timedelta(days=1),
         ).order_by(EmailVerification.created_at.desc())).all()
-        if verified or len(recent) >= 5 or (recent and recent[0] > now - timedelta(seconds=60)):
+        if len(recent) >= 5 or (recent and recent[0] > now - timedelta(seconds=60)):
             return MessageResponse(message=REQUEST_MESSAGE)
         token = secrets.token_urlsafe(32)
         session.execute(update(EmailVerification).where(
@@ -91,7 +92,7 @@ def request_verification(
         ))
         session.flush()
         try:
-            send_verification_email(body.email, token, settings)
+            send_verification_email(body.email, token, settings, purpose="login" if verified else "verify")
         except (OSError, smtplib.SMTPException):
             # Rolling back preserves the previous token and resend allowance.
             raise HTTPException(503, "Email delivery is unavailable. Please try again later.", headers={"Cache-Control": "no-store"}) from None
@@ -102,6 +103,7 @@ def request_verification(
 def confirm_verification(
     body: VerificationConfirm, response: Response,
     session: Annotated[Session, Depends(get_session)],
+    settings: Annotated[Settings, Depends(verification_settings)],
 ) -> MessageResponse:
     response.headers["Cache-Control"] = "no-store"
     digest = hashlib.sha256(body.token.encode()).hexdigest()
@@ -116,7 +118,9 @@ def confirm_verification(
             raise HTTPException(400, INVALID_MESSAGE, headers={"Cache-Control": "no-store"})
         user = session.scalar(select(User).where(User.email == email).with_for_update())
         if user is None:
-            session.add(User(email=email, display_name=body.display_name, email_verified_at=now))
+            user = User(email=email, display_name=body.display_name, email_verified_at=now)
+            session.add(user)
+            session.flush()
         elif user.email_verified_at is None:
             user.email_verified_at = now
             user.display_name = body.display_name
@@ -125,4 +129,6 @@ def confirm_verification(
             EmailVerification.email == email, EmailVerification.id != record.id,
             EmailVerification.consumed_at.is_(None), EmailVerification.invalidated_at.is_(None),
         ).values(invalidated_at=now))
+        token = create_session(session, user.id, settings)
+    response.set_cookie(SESSION_COOKIE, token, max_age=settings.session_ttl_days * 86400, **cookie_kwargs(settings))
     return MessageResponse(message="Your institute email is verified.")

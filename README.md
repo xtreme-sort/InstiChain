@@ -4,8 +4,8 @@ Faculty-authorized campus competition records and achievement verification.
 
 The project provides a React + TypeScript frontend, a FastAPI backend,
 configuration templates, a live API connection check and PostgreSQL models with
-Alembic migrations and institute email verification. Login, competition workflows, signatures and Drive integration
-come in later milestones.
+Alembic migrations, institute email verification and session-based login.
+Competition workflows, signatures and Drive integration come in later milestones.
 The health endpoint reports API availability only.
 
 ## Requirements
@@ -26,9 +26,10 @@ backend/
     config.py          Environment settings
     database.py        SQLAlchemy base, engine and session dependency
     main.py            FastAPI app and GET /api/health
-    models.py          Users, clubs, appointments, competitions, credentials, ledger
+    models.py          Users, sessions, clubs, appointments, competitions, credentials, ledger
     verification.py    Institute email request and confirmation endpoints
-    email_delivery.py  SMTP verification messages
+    session.py          Session cookie dependency, session lookup and logout
+    email_delivery.py  SMTP verification and login messages
   migrations/          Versioned Alembic migrations
   tests/               PostgreSQL migration and constraint tests
   alembic.ini          Migration configuration
@@ -91,7 +92,8 @@ python -m alembic current
 For an existing checkout, add `INSTICHAIN_DATABASE_URL` from `.env.example` to
 your existing `.env`; do not overwrite your other settings. The default URL also
 matches the Compose database. Revision `0001` creates the six core tables.
-Revision `0002` adds hashed email verification tokens.
+Revision `0002` adds hashed email verification tokens. Revision `0003` adds
+hashed login sessions.
 Migrations run explicitly; starting FastAPI never creates or changes tables.
 
 From `backend/`, inspect generated SQL without connecting to PostgreSQL:
@@ -131,7 +133,7 @@ Open <http://127.0.0.1:5173>. The service status should become **Connected**.
 Use the refresh button to check again after restarting the backend.
 Stop either development server with `Ctrl+C` in its terminal.
 
-## Email Verification
+## Email Verification and Login
 
 Start the database and local test inbox from the repository root:
 
@@ -144,9 +146,15 @@ from `backend/`, then start the backend and frontend as described above. Add the
 new settings from `backend/.env.example` to your existing `.env` as needed.
 
 1. Open <http://127.0.0.1:5173> and enter an institute email.
-2. Open the local inbox at <http://127.0.0.1:8025> and follow the verification link.
-3. Enter your name and select **Verify email**. Opening the link alone does not
+2. Open the local inbox at <http://127.0.0.1:8025> and follow the emailed link.
+3. First-time addresses enter their name and select **Verify email**; already
+   verified addresses are signed in immediately. Opening the link alone does not
    consume it; confirmation requires a POST request.
+4. Reloading the page keeps you signed in. Select **Log out** to end the session.
+
+There are no passwords anywhere in this design. Requesting a link for an
+already-verified address sends a sign-in link instead of a new verification link,
+using the same endpoints, rate limits and single-use tokens described below.
 
 Mailpit captures development email locally; it does not deliver to the actual
 institute inbox. For real delivery, configure your SMTP provider using the backend
@@ -157,6 +165,9 @@ to serve `index.html` for `/verify-email` so emailed deep links work.
 
 - `POST /api/auth/email/request` accepts `{"email":"student@smail.iitm.ac.in"}`.
 - `POST /api/auth/email/confirm` accepts `{"token":"<token from email>","display_name":"Student Name"}`.
+  On success it verifies (or creates) the account and starts a session.
+- `GET /api/auth/session` returns the signed-in user (`401` if not signed in).
+- `POST /api/auth/logout` revokes the current session; safe to call without one.
 - Addresses must use `iitm.ac.in` or a proper subdomain such as `smail.iitm.ac.in`.
   Lookalikes, malformed addresses and non-ASCII addresses are rejected. Addresses
   are trimmed and lowercased; DNS checks are not used as proof of ownership.
@@ -167,10 +178,17 @@ to serve `index.html` for `/verify-email` so emailed deep links work.
   email link if you reload the confirmation page before submitting.
 - Resends are limited to one per minute and five per rolling 24 hours per address.
   A successful resend invalidates earlier links. Valid email requests return the
-  same accepted response for existing verified accounts and throttled addresses.
+  same accepted response whether the address is new, already verified or
+  throttled; only throttled addresses receive no new email.
 - Confirmation creates a basic verified user (or verifies an existing unverified
-  user while preserving their ID). It grants no appointments, roles or session.
-  Login and sessions remain the next milestone.
+  user while preserving their ID) and issues a session. It grants no appointments
+  or roles; those remain a later milestone.
+- Sessions are a server-side row referenced by a random 256-bit token in an
+  httpOnly, `SameSite=Lax` cookie, marked `Secure` whenever
+  `INSTICHAIN_PUBLIC_APP_URL` is HTTPS. Only the session token's SHA-256 hash is
+  stored. Logging out revokes the row immediately rather than waiting on
+  expiry, matching the ledger's later requirement to recheck authority on every
+  protected request.
 - Database transactions and per-email locks prevent concurrent token reuse and
   serialize resends with confirmations. SMTP failures roll back token changes and
   return 503. If SMTP accepts mail but the subsequent database commit fails, that
@@ -188,6 +206,7 @@ limits; expired older rows can be removed by a future retention job.
 | `backend/.env` | `INSTICHAIN_DATABASE_URL` | `postgresql+psycopg://instichain:instichain@127.0.0.1:5432/instichain` | PostgreSQL connection used by migrations and database sessions |
 | `backend/.env` | `INSTICHAIN_PUBLIC_APP_URL` | `http://127.0.0.1:5173` | Trusted frontend origin for emailed links |
 | `backend/.env` | `INSTICHAIN_VERIFICATION_TTL_MINUTES` | `15` | Link lifetime, from 1 to 60 minutes |
+| `backend/.env` | `INSTICHAIN_SESSION_TTL_DAYS` | `30` | Session lifetime after signing in, from 1 to 365 days |
 | `backend/.env` | `INSTICHAIN_SMTP_HOST` / `INSTICHAIN_SMTP_PORT` | `127.0.0.1` / `1025` | SMTP server |
 | `backend/.env` | `INSTICHAIN_SMTP_SECURITY` | `plain` | `plain` for local Mailpit, `starttls` or `ssl` for real delivery |
 | `backend/.env` | `INSTICHAIN_SMTP_FROM` | `InstiChain <no-reply@instichain.local>` | Sender address |

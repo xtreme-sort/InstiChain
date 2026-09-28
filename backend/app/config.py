@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://instichain:instichain@127.0.0.1:5432/instichain"
     public_app_url: AnyHttpUrl = "http://127.0.0.1:5173"
     verification_ttl_minutes: int = Field(default=15, ge=1, le=60)
+    session_ttl_days: int = Field(default=30, ge=1, le=365)
     smtp_host: str = "127.0.0.1"
     smtp_port: int = Field(default=1025, ge=1, le=65535)
     smtp_security: Literal["plain", "starttls", "ssl"] = "plain"

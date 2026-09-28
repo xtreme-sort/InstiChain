@@ -1,21 +1,32 @@
 import smtplib
 import ssl
 from email.message import EmailMessage
+from typing import Literal
 
 from app.config import Settings
 
+Purpose = Literal["verify", "login"]
 
-def send_verification_email(email: str, token: str, settings: Settings) -> None:
+
+def send_verification_email(email: str, token: str, settings: Settings, purpose: Purpose = "verify") -> None:
     url = f"{str(settings.public_app_url).rstrip('/')}/verify-email#token={token}"
     message = EmailMessage()
-    message["Subject"] = "Verify your InstiChain email"
     message["From"] = settings.smtp_from
     message["To"] = email
-    message.set_content(
-        f"Confirm your institute email address:\n\n{url}\n\n"
-        f"This link expires in {settings.verification_ttl_minutes} minutes and works once.\n"
-        "If you did not request this email, you can ignore it.\n"
-    )
+    if purpose == "login":
+        message["Subject"] = "Sign in to InstiChain"
+        message.set_content(
+            f"Sign in to InstiChain:\n\n{url}\n\n"
+            f"This link expires in {settings.verification_ttl_minutes} minutes and works once.\n"
+            "If you did not request this email, you can ignore it.\n"
+        )
+    else:
+        message["Subject"] = "Verify your InstiChain email"
+        message.set_content(
+            f"Confirm your institute email address:\n\n{url}\n\n"
+            f"This link expires in {settings.verification_ttl_minutes} minutes and works once.\n"
+            "If you did not request this email, you can ignore it.\n"
+        )
     client = smtplib.SMTP_SSL if settings.smtp_security == "ssl" else smtplib.SMTP
     kwargs = {"context": ssl.create_default_context()} if settings.smtp_security == "ssl" else {}
     with client(settings.smtp_host, settings.smtp_port, timeout=10, **kwargs) as smtp:

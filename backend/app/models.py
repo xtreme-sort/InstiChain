@@ -42,6 +42,21 @@ class EmailVerification(Base):
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Session(Base):
+    __tablename__ = "sessions"
+    __table_args__ = (
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="token_hash_format"),
+        CheckConstraint("expires_at > created_at", name="expiry_order"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Club(Base):
     __tablename__ = "clubs"
     __table_args__ = (

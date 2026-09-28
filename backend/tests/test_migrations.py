@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base
-from app.models import Appointment, Club, Competition, Credential, LedgerEntry, User
+from app.models import Appointment, Club, Competition, Credential, LedgerEntry, Session, User
 
 
 @unittest.skipUnless(os.getenv("INSTICHAIN_TEST_DATABASE_URL"), "Set INSTICHAIN_TEST_DATABASE_URL to run PostgreSQL tests")
@@ -109,6 +109,22 @@ class MigrationTests(unittest.TestCase):
         ]:
             with self.subTest(email=email):
                 self.reject(User.__table__.insert().values(email=email, display_name="Duplicate"), constraint)
+
+    def test_session_shape_constraints(self):
+        cases = [
+            ({"token_hash": "invalid"}, "ck_sessions_token_hash_format"),
+            ({"expires_at": self.now}, "ck_sessions_expiry_order"),
+        ]
+        for overrides, constraint in cases:
+            with self.subTest(constraint=constraint):
+                values = dict(
+                    user_id=self.student, token_hash="a" * 64,
+                    created_at=self.now, expires_at=self.now + timedelta(days=30),
+                ) | overrides
+                self.reject(Session.__table__.insert().values(**values), constraint)
+        session_id = self.insert(Session, user_id=self.student, token_hash="b" * 64,
+                                  created_at=self.now, expires_at=self.now + timedelta(days=30))
+        self.assertIsNotNone(session_id)
 
     def test_verification_upgrade_preserves_existing_users(self):
         command.downgrade(self.config, "0001")

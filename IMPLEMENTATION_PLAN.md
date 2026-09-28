@@ -21,6 +21,13 @@ Completion demo: verify an institute email, log in and show a club with its trus
 
 Identity checks must accept `iitm.ac.in` and its subdomains using an exact domain-boundary check, reject lookalikes and keep stable internal user IDs separate from email addresses.
 
+No passwords exist anywhere in this design. Item 4 (login/sessions) reuses the same
+single-use email-link mechanism as item 3: an already-verified user requesting a new
+link receives a sign-in link instead of a verification link, and confirming it opens a
+session. Sessions are server-side rows referenced by a random token in an httpOnly
+cookie, so a session can be revoked immediately (logout, compromise) without waiting on
+token expiry — consistent with rechecking authority on every protected request.
+
 ## Week 2: Club Authority and Result Submission
 
 | Order | Feature | Example Commit Message |

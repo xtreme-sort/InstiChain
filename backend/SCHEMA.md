@@ -8,6 +8,7 @@ keys do not cascade deletes, preserving references to historical records.
 | --- | --- |
 | `users` | Stable UUID identity, unique normalized email, display name and optional email verification timestamp. No elevated role is granted by this table. |
 | `email_verifications` | Added by `0002`: email, unique SHA-256 token hash, creation/expiry timestamps and consumed/invalidated timestamps. No user is created until confirmation. |
+| `sessions` | Added by `0003`: user, unique SHA-256 session-token hash, creation/expiry timestamps and an optional revocation timestamp. Confirming an email verification or login link creates one. |
 | `clubs` | Unique slug, name, description and the user who created the club. |
 | `appointments` | Club, appointed user, grantor, position, start/end times and grant/revocation ledger references. Supports faculty advisors, heads and office bearers. |
 | `competitions` | Owning club, creator, title, description and scheduled start/end times. |
@@ -26,7 +27,9 @@ keys do not cascade deletes, preserving references to historical records.
 - Credential uniqueness on `(result_id, submission_version, recipient_id)` allows
   one credential per team member while rejecting duplicate issuance for that
   result version. A new version can support a correction.
-- Hashes use 64 lowercase hexadecimal characters; signatures use 64 raw bytes.
+- Hashes use 64 lowercase hexadecimal characters; signatures use 64 raw bytes. This
+  also covers session tokens: only their SHA-256 hashes are stored, matching email
+  verification tokens.
 - Ledger sequence numbers are supplied by the future serialized writer. The first
   entry has a null previous hash; later entries require a previous hash.
 - A trigger rejects ledger UPDATE, DELETE and TRUNCATE statements. A migration
