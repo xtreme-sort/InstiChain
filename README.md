@@ -3,16 +3,16 @@
 Faculty-authorized campus competition records and achievement verification.
 
 The project provides a React + TypeScript frontend, a FastAPI backend,
-configuration templates, a live API connection check and PostgreSQL models with
-Alembic migrations, institute email verification and session-based login.
-Competition workflows, signatures and Drive integration come in later milestones.
-The health endpoint reports API availability only.
+configuration templates, institute email verification, session-based login and a
+Hyperledger Fabric ledger for administrator events. PostgreSQL stores accounts,
+sessions and application projections; Fabric is the authoritative audit record.
 
 ## Requirements
 
 - Node.js 22.12 or newer and npm
 - Python 3.12 or newer with `pip` and `venv`
-- PostgreSQL 16 or newer, or Docker with Compose for the local database
+- Docker with Compose (PostgreSQL, Mailpit and the local Fabric network)
+- `curl`, OpenSSL and Git for the official Fabric development runtime
 
 Cloud credentials are not required for the local test inbox. The frontend and API
 health endpoint still start without a database; email verification requires
@@ -42,6 +42,10 @@ frontend/
   package.json         Frontend scripts and dependencies
   package-lock.json    Frontend dependency lockfile
   vite.config.ts       Development server and API proxy
+fabric/
+  chaincode/           InstiChain Fabric smart contract
+  gateway/             Node bridge using the official Fabric Gateway SDK
+  README.md            Fabric installation, topology and demo commands
 ```
 
 ## Backend Setup
@@ -129,6 +133,8 @@ your existing `.env`; do not overwrite your other settings. The default URL also
 matches the Compose database. Revision `0001` creates the six core tables.
 Revision `0002` adds hashed email verification tokens. Revision `0003` adds
 hashed login sessions.
+Revision `0005` redirects ledger references to Fabric transaction receipts while
+retaining the former PostgreSQL hash-chain rows as read-only legacy history.
 Migrations run explicitly; starting FastAPI never creates or changes tables.
 
 From `backend/`, inspect generated SQL without connecting to PostgreSQL:
@@ -249,6 +255,10 @@ verification, SMTP delivery checks and read-only Google Drive access probe.
 No account is promoted by signup. Private keys stay outside Git. Real SMTP inbox
 delivery and Drive test-account access require your own provider configuration.
 
+Before bootstrapping an administrator, follow
+[the Fabric development-network guide](fabric/README.md). Administrator bootstrap,
+club creation and advisor appointment require a confirmed Fabric commit.
+
 ## Configuration
 
 | File | Variable | Default | Purpose |
@@ -262,6 +272,8 @@ delivery and Drive test-account access require your own provider configuration.
 | `backend/.env` | `INSTICHAIN_SMTP_SECURITY` | `plain` | `plain` for local Mailpit, `starttls` or `ssl` for real delivery |
 | `backend/.env` | `INSTICHAIN_SMTP_FROM` | `InstiChain <no-reply@instichain.local>` | Sender address |
 | `backend/.env` | `INSTICHAIN_SMTP_USERNAME` / `INSTICHAIN_SMTP_PASSWORD` | unset | Optional SMTP credentials; keep in local environment only |
+| `backend/.env` | `INSTICHAIN_FABRIC_BRIDGE_URL` | `http://127.0.0.1:3001` | Private Node Gateway bridge used to submit and query Fabric transactions |
+| `backend/.env` | `INSTICHAIN_FABRIC_BRIDGE_TOKEN` | unset | Shared secret for the loopback bridge; must match `fabric/.env` |
 | `frontend/.env` | `API_PROXY_TARGET` | `http://127.0.0.1:8000` | Backend destination for the Vite development proxy |
 
 Both apps work with defaults when `.env` is absent. Restart the relevant server

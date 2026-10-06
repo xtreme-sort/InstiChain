@@ -3,14 +3,14 @@ import binascii
 from datetime import timezone
 from typing import Annotated
 from urllib.parse import urlsplit
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.authority import append_admin_event, load_signing_key, lock_ledger
+from app.authority import FabricUnavailable, append_admin_event, load_signing_key, lock_ledger
 from app.config import Settings
 from app.database import get_session
 from app.models import Administrator, Appointment, AuthorityKey, Club, User
@@ -124,10 +124,15 @@ def create_club(body: ClubRequest, admin: Admin, db: Database, settings: Configu
     if db.scalar(select(Club.id).where(Club.slug == body.slug)):
         raise HTTPException(409, "A club with this slug already exists.")
     key, private_key = signer(db, admin, settings)
-    club = Club(id=uuid4(), **body.model_dump(), created_by_id=admin.user_id)
+    club = Club(id=uuid5(NAMESPACE_URL, f"instichain:club:{body.slug}"),
+                **body.model_dump(), created_by_id=admin.user_id)
     db.add(club)
-    append_admin_event(db, key, private_key, "CLUB_CREATED", {"club_id": str(club.id)},
-                       {"slug": club.slug, "name": club.name, "description": club.description})
+    try:
+        append_admin_event(db, key, private_key, settings, club.id, "CLUB_CREATED",
+                           {"club_id": str(club.id)},
+                           {"slug": club.slug, "name": club.name, "description": club.description})
+    except FabricUnavailable:
+        raise HTTPException(503, "The Fabric ledger is unavailable; no club was created.") from None
     db.commit()
     return {"id": str(club.id), "name": club.name, "slug": club.slug}
 
@@ -157,21 +162,29 @@ def appoint_advisor(club_id: UUID, body: AdvisorRequest, admin: Admin, db: Datab
                         or advisor_key.purpose != "advisor"):
         raise HTTPException(409, "This public key cannot be assigned to this advisor.")
     if advisor_key is None:
-        advisor_key = AuthorityKey(id=uuid4(), user_id=user.id, public_key=raw_key, purpose="advisor",
+        advisor_key = AuthorityKey(id=uuid5(NAMESPACE_URL, f"instichain:advisor-key:{body.public_key}"),
+                                   user_id=user.id, public_key=raw_key, purpose="advisor",
                                    verified_by_id=admin.user_id, verification_reference=body.verification_reference)
         db.add(advisor_key)
         db.flush()
-    appointment_id = uuid4()
+    appointment_id = uuid5(
+        NAMESPACE_URL,
+        f"instichain:appointment:{club_id}:{user.id}:{body.starts_at.isoformat()}:{body.ends_at.isoformat()}",
+    )
     # Never backdate authority: a past requested start becomes the actual grant time.
-    event = append_admin_event(db, signing_key, private_key, "ADVISOR_APPOINTED",
-        {"club_id": str(club_id), "user_id": str(user.id), "appointment_id": str(appointment_id)},
-        {"position": "faculty_advisor", "key_id": str(advisor_key.id), "public_key": body.public_key,
-         "starts_at": starts_at.astimezone(timezone.utc).isoformat(),
-         "ends_at": body.ends_at.astimezone(timezone.utc).isoformat()})
+    try:
+        event = append_admin_event(db, signing_key, private_key, settings, appointment_id,
+            "ADVISOR_APPOINTED",
+            {"club_id": str(club_id), "user_id": str(user.id), "appointment_id": str(appointment_id)},
+            {"position": "faculty_advisor", "key_id": str(advisor_key.id), "public_key": body.public_key,
+             "starts_at": starts_at.astimezone(timezone.utc).isoformat(),
+             "ends_at": body.ends_at.astimezone(timezone.utc).isoformat()})
+    except FabricUnavailable:
+        raise HTTPException(503, "The Fabric ledger is unavailable; no advisor was appointed.") from None
     db.add(Appointment(id=appointment_id, club_id=club_id, user_id=user.id, position="faculty_advisor",
                        granted_by_id=admin.user_id, starts_at=starts_at, ends_at=body.ends_at,
                        advisor_key_id=advisor_key.id, verification_reference=body.verification_reference,
-                       grant_transaction_id=event.transaction_id))
+                       grant_transaction_id=event.request_id))
     db.commit()
     return {"id": str(appointment_id), "club_id": str(club_id), "advisor_id": str(user.id),
             "key_id": str(advisor_key.id), "starts_at": starts_at, "ends_at": body.ends_at}

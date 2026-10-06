@@ -14,7 +14,7 @@ from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base
-from app.models import Appointment, Club, Competition, Credential, LedgerEntry, Session, User
+from app.models import Appointment, Club, Competition, Credential, FabricTransaction, LedgerEntry, Session, User
 
 
 @unittest.skipUnless(os.getenv("INSTICHAIN_TEST_DATABASE_URL"), "Set INSTICHAIN_TEST_DATABASE_URL to run PostgreSQL tests")
@@ -71,9 +71,18 @@ class MigrationTests(unittest.TestCase):
         return values | overrides
 
     def append(self, **overrides):
-        values = self.ledger_values(**overrides)
-        self.connection.execute(LedgerEntry.__table__.insert().values(**values))
-        return values["transaction_id"]
+        self.sequence += 1
+        request_id = uuid4()
+        values = dict(
+            request_id=request_id, source="fabric", sequence=self.sequence,
+            fabric_transaction_id=f"fabric-{request_id}", submitted_transaction_id=f"fabric-{request_id}",
+            channel_name="instichain", chaincode_name="instichain", block_number=self.sequence,
+            validation_code=0, schema_version=1, event_type="ACHIEVEMENT_ISSUED",
+            object_ids={"club_id": str(self.club)}, payload={}, actor_id=self.actor,
+            actor_key_id=uuid4(), signature=b"x" * 64, committed_at=self.now,
+        ) | overrides
+        self.connection.execute(FabricTransaction.__table__.insert().values(**values))
+        return request_id
 
     def credential_values(self, **overrides):
         return dict(
@@ -168,7 +177,7 @@ class MigrationTests(unittest.TestCase):
         self.reject(Credential.__table__.insert().values(**(values | {"proof_digest": "invalid"})),
                     "ck_credentials_proof_digest_format")
         self.reject(Credential.__table__.insert().values(**(values | {"issuance_transaction_id": uuid4()})),
-                    "fk_credentials_issuance_transaction_id_ledger_entries")
+                    "fk_credentials_issuance_transaction_id_fabric_transactions")
 
     def test_references_prevent_orphans_and_cascade_deletion(self):
         self.reject(Club.__table__.insert().values(slug="missing", name="Missing", created_by_id=uuid4()),
@@ -190,7 +199,7 @@ class MigrationTests(unittest.TestCase):
                 self.reject(LedgerEntry.__table__.insert().values(**values), constraint)
 
     def test_ledger_rejects_mutation(self):
-        self.append()
+        self.connection.execute(LedgerEntry.__table__.insert().values(**self.ledger_values()))
         for statement in [
             LedgerEntry.__table__.update().values(event_type="CHANGED"),
             LedgerEntry.__table__.delete(),

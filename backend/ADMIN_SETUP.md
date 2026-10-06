@@ -18,7 +18,8 @@ python -m alembic upgrade head
 ```
 
 Revision `0004` adds administrator and public-key records and advisor appointment
-metadata. Existing users, clubs and ledger entries are preserved.
+metadata. Revision `0005` switches new authority events to Hyperledger Fabric.
+Complete [the Fabric setup](../fabric/README.md) before bootstrapping.
 
 ## 2. Bootstrap the Initial Administrator
 
@@ -52,7 +53,8 @@ python -m app.bootstrap admin \
 ```
 
 Bootstrap requires an existing verified account and writes a signed
-`ADMIN_BOOTSTRAPPED` event. Repeating it with the same account and key is harmless.
+`ADMIN_BOOTSTRAPPED` event to Fabric. Repeating it with the same account and key
+is harmless.
 Attempts to add a different administrator or resurrect a revoked bootstrap fail.
 There is no HTTP bootstrap endpoint and no automatic "first user is admin" rule.
 
@@ -98,14 +100,17 @@ API endpoints (session cookie required):
 | POST | `/api/admin/clubs/{club_id}/advisors` | Register/bind the advisor key and append an appointment |
 
 Mutating requests must include an `Origin` matching `INSTICHAIN_PUBLIC_APP_URL`.
-The browser supplies this automatically. Advisor appointment and key registration
-are one transaction with the signed ledger event; failed writes leave no partial
-club or appointment. Concurrent overlapping appointments produce one success and
-one conflict. A duplicate club slug returns a conflict without another event.
+The browser supplies this automatically. Fabric must confirm the signed event
+before PostgreSQL commits the corresponding club or appointment projection. A
+Fabric failure therefore leaves no local partial record. Deterministic request IDs
+make an identical retry idempotent on-chain. Concurrent overlapping appointments
+produce one success and one conflict. A duplicate club slug returns a conflict
+without another event.
 
 The server signs these administrative events with the operator-provisioned key.
 This does not implement advisor credential signing, annual handover, advisor
-revocation UI, key recovery, full ledger replay or independent checkpoints.
+revocation UI or key recovery. The local two-organization network is a development
+topology; production organizations must operate their nodes independently.
 
 ## 4. Check Email Delivery Early
 

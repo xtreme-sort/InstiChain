@@ -82,7 +82,7 @@ class Administrator(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), unique=True)
     key_id: Mapped[UUID] = mapped_column(ForeignKey("authority_keys.id"), unique=True)
-    bootstrap_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    bootstrap_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -137,6 +137,39 @@ class LedgerEntry(Base):
     entry_hash: Mapped[str] = mapped_column(String(64), unique=True)
 
 
+class FabricTransaction(Base):
+    """Committed Fabric event receipt and local query projection."""
+
+    __tablename__ = "fabric_transactions"
+    __table_args__ = (
+        CheckConstraint("source IN ('fabric', 'legacy')", name="source"),
+        CheckConstraint("sequence IS NULL OR sequence > 0", name="positive_sequence"),
+        CheckConstraint("schema_version > 0", name="positive_schema_version"),
+        CheckConstraint("event_type ~ '^[A-Z][A-Z0-9_]*$'", name="event_type_format"),
+        CheckConstraint("jsonb_typeof(object_ids) = 'object'", name="object_ids_object"),
+        CheckConstraint("jsonb_typeof(payload) = 'object'", name="payload_object"),
+        Index("ix_fabric_transactions_event_type_sequence", "event_type", "sequence"),
+    )
+
+    request_id: Mapped[UUID] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), default="fabric")
+    sequence: Mapped[int | None] = mapped_column(BigInteger)
+    fabric_transaction_id: Mapped[str | None] = mapped_column(String(128), unique=True)
+    submitted_transaction_id: Mapped[str | None] = mapped_column(String(128))
+    channel_name: Mapped[str | None] = mapped_column(String(128))
+    chaincode_name: Mapped[str | None] = mapped_column(String(128))
+    block_number: Mapped[int | None] = mapped_column(BigInteger)
+    validation_code: Mapped[int | None] = mapped_column(Integer)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    event_type: Mapped[str] = mapped_column(String(64))
+    object_ids: Mapped[dict] = mapped_column(JSONB)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    actor_key_id: Mapped[UUID]
+    signature: Mapped[bytes | None] = mapped_column(LargeBinary)
+    committed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Appointment(Base):
     __tablename__ = "appointments"
     __table_args__ = (
@@ -160,9 +193,9 @@ class Appointment(Base):
     verification_reference: Mapped[str | None] = mapped_column(String(500))
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    grant_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    grant_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -208,8 +241,8 @@ class Credential(Base):
     result_id: Mapped[UUID]
     submission_version: Mapped[int] = mapped_column(Integer)
     proof_digest: Mapped[str] = mapped_column(String(64))
-    issuance_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    issuance_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("ledger_entries.transaction_id"), unique=True)
+    revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     supersedes_id: Mapped[UUID | None] = mapped_column(ForeignKey("credentials.id"), unique=True)

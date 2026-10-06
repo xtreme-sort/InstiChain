@@ -16,6 +16,7 @@ keys do not cascade deletes, preserving references to historical records.
 | `competitions` | Owning club, creator, title, description and scheduled start/end times. |
 | `credentials` | Competition, recipient, approving advisor, award, shared result ID, submission version, SHA-256 proof digest and issuance/revocation references. A replacement points to the credential it supersedes. |
 | `ledger_entries` | Explicit sequence, unique transaction ID, schema version, event type, JSONB object IDs/payload, actor/key IDs, Ed25519 signature bytes, commit timestamp and chain hashes. |
+| `fabric_transactions` | Added by `0005`: Fabric request and transaction IDs, block/validation receipt, signed event projection and channel/chaincode identity. Legacy hash-chain rows are copied here for reference. |
 
 ## Constraints
 
@@ -32,7 +33,7 @@ keys do not cascade deletes, preserving references to historical records.
 - Hashes use 64 lowercase hexadecimal characters; signatures use 64 raw bytes. This
   also covers session tokens: only their SHA-256 hashes are stored, matching email
   verification tokens.
-- Ledger sequence numbers are supplied by the serialized admin writer. The first
+- Legacy ledger sequence numbers are supplied by the serialized admin writer. The first
   entry has a null previous hash; later entries require a previous hash.
 - A trigger rejects ledger UPDATE, DELETE and TRUNCATE statements. A migration
   owner can still drop the table or disable its trigger; this is not protection
@@ -41,13 +42,13 @@ keys do not cascade deletes, preserving references to historical records.
 ## Deliberately Deferred
 
 Email verification, sessions and administrator authorization are implemented.
-Bootstrap, club creation and advisor appointments append server-signed Ed25519
-events in the same transaction as their records. A shared PostgreSQL advisory
-lock serializes writes. The signature covers the RFC 8785 canonical action
-envelope; the entry hash additionally covers sequence, signature, UTC commit time
-and previous hash. Full ledger replay, audit verification and advisor-signed
-credential issuance remain future milestones. Direct SQL writes do not run the
-writer's checks. The operating server and initial administrator are trust anchors.
+Bootstrap, club creation and advisor appointments submit server-signed Ed25519
+events to Hyperledger Fabric. Both the institute and auditor organizations must
+endorse writes. PostgreSQL keeps a receipt and current-state projection after the
+Fabric commit. The old `ledger_entries` hash chain remains immutable legacy data
+and receives no new application writes. Advisor-signed credential issuance remains
+a future milestone. The Fabric MSP identities and initial administrator are trust
+anchors.
 
 New admin events bind `actor_key_id` to `authority_keys`; existing ledger rows
 remain unchanged and no foreign key is retroactively imposed. `result_id` remains
@@ -60,8 +61,10 @@ share permissions remain future modules.
 Appointments and credentials are current-state projection tables. Their mutable
 revocation/replacement fields will be maintained from immutable ledger events.
 Ending an appointment does not delete credentials or automatically revoke them.
-The eventual application database role must be separate from the migration owner
-and must not receive UPDATE, DELETE or TRUNCATE privileges on the ledger.
+The eventual application database role must be separate from the migration owner.
+Fabric peer, CA and orderer identities must be held by their respective operators,
+not by one shared production administrator.
 
-The Compose credentials are for local development only. The `/api/health` endpoint
-remains a process liveness check and does not report database readiness.
+The Compose credentials and Fabric test-network identities are for local development
+only. `/api/health` reports API liveness; `/api/ledger/health` verifies a live
+Fabric query through the Gateway bridge.

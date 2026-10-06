@@ -1,11 +1,11 @@
 import base64
-import hashlib
 import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -19,12 +19,12 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.admin import admin_settings
-from app.authority import action_document, entry_document
+from app.authority import FabricClient, action_document
 from app.bootstrap import bootstrap_admin
 from app.config import Settings
 from app.database import get_session
 from app.main import app
-from app.models import Administrator, Appointment, AuthorityKey, Club, LedgerEntry, User
+from app.models import Administrator, Appointment, AuthorityKey, Club, FabricTransaction, User
 from app.session import SESSION_COOKIE, create_session
 
 
@@ -51,7 +51,28 @@ class AdminTests(unittest.TestCase):
         self.key_path.write_bytes(self.private_key.private_bytes(serialization.Encoding.PEM,
                                   serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         self.key_path.chmod(0o600)
-        self.settings = Settings(_env_file=None, admin_signing_key_file=self.key_path)
+        self.settings = Settings(_env_file=None, admin_signing_key_file=self.key_path,
+                                 fabric_bridge_token="test-bridge-token")
+        self.fabric_sequence = 0
+        self.fabric_lock = Lock()
+
+        def submit(_client, document):
+            with self.fabric_lock:
+                self.fabric_sequence += 1
+                sequence = self.fabric_sequence
+            return document | {
+                "schema_version": 1,
+                "sequence": sequence,
+                "fabric_transaction_id": f"fabric-{document['request_id']}",
+                "submitted_transaction_id": f"submitted-{sequence}",
+                "block_number": str(sequence),
+                "validation_code": 0,
+                "committed_at": self.now.isoformat(),
+            }
+
+        fabric_patch = patch.object(FabricClient, "submit", autospec=True, side_effect=submit)
+        fabric_patch.start()
+        self.addCleanup(fabric_patch.stop)
         self.now = datetime.now(timezone.utc)
         self.users = {}
         with Session(self.engine) as db, db.begin():
@@ -84,7 +105,8 @@ class AdminTests(unittest.TestCase):
 
     def bootstrap(self, name="admin"):
         with Session(self.engine) as db, db.begin():
-            return bootstrap_admin(db, f"{name}@iitm.ac.in", "Institutional approval 001", self.private_key).user_id
+            return bootstrap_admin(db, f"{name}@iitm.ac.in", "Institutional approval 001",
+                                   self.private_key, self.settings).user_id
 
     def club(self, slug="coding"):
         response = self.client.post("/api/admin/clubs", json={"name": slug.title(), "slug": slug})
@@ -107,7 +129,7 @@ class AdminTests(unittest.TestCase):
             self.bootstrap("student")
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Administrator)), 1)
-            self.assertEqual(db.scalar(select(func.count()).select_from(LedgerEntry)), 1)
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 1)
 
     def test_racing_bootstraps_establish_only_one_admin(self):
         def attempt(name):
@@ -137,7 +159,7 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/admin/clubs", json={"name": "Other", "slug": "other", "role": "admin"}).status_code, 422)
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Club)), 1)
-            self.assertEqual(db.scalar(select(func.count()).select_from(LedgerEntry)), 2)
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 2)
 
     def test_advisor_binding_and_signed_chain(self):
         self.bootstrap()
@@ -150,14 +172,14 @@ class AdminTests(unittest.TestCase):
             self.assertEqual(appointment.user_id, self.users["advisor"])
             self.assertGreaterEqual(appointment.starts_at, self.now)
             self.assertEqual(db.get(AuthorityKey, appointment.advisor_key_id).user_id, appointment.user_id)
-            previous_hash = None
-            for sequence, entry in enumerate(db.scalars(select(LedgerEntry).order_by(LedgerEntry.sequence)), 1):
+            for sequence, entry in enumerate(db.scalars(select(FabricTransaction).where(
+                    FabricTransaction.source == "fabric").order_by(FabricTransaction.sequence)), 1):
                 self.assertEqual(entry.sequence, sequence)
-                self.assertEqual(entry.previous_entry_hash, previous_hash)
                 key = db.get(AuthorityKey, entry.actor_key_id)
-                Ed25519PublicKey.from_public_bytes(key.public_key).verify(entry.signature, rfc8785.dumps(action_document(entry)))
-                self.assertEqual(entry.entry_hash, hashlib.sha256(rfc8785.dumps(entry_document(entry))).hexdigest())
-                previous_hash = entry.entry_hash
+                document = action_document(entry.request_id, entry.event_type, entry.object_ids,
+                                           entry.payload, entry.actor_id, entry.actor_key_id)
+                Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                    entry.signature, rfc8785.dumps(document))
         self.assertEqual(self.client.get("/api/admin/clubs").json()[0]["advisors"][0]["status"], "active")
         self.login("advisor")
         self.assertEqual(self.client.get("/api/admin/access").status_code, 403)

@@ -5,7 +5,7 @@ import base64
 import getpass
 import os
 from pathlib import Path
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -13,14 +13,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.authority import append_admin_event, load_signing_key, lock_ledger
+from app.authority import FabricUnavailable, append_admin_event, load_signing_key, lock_ledger
 from app.config import Settings
 from app.database import get_engine
 from app.models import Administrator, AuthorityKey, User
 from app.verification import normalize_institute_email
 
 
-def bootstrap_admin(db: Session, email: str, reference: str, private_key: Ed25519PrivateKey) -> Administrator:
+def bootstrap_admin(db: Session, email: str, reference: str, private_key: Ed25519PrivateKey,
+                    settings: Settings | None = None) -> Administrator:
     email = normalize_institute_email(email)
     reference = reference.strip()
     if not 1 <= len(reference) <= 500:
@@ -36,13 +37,18 @@ def bootstrap_admin(db: Session, email: str, reference: str, private_key: Ed2551
                 and key.revoked_at is None and key.public_key == private_key.public_key().public_bytes_raw()):
             return existing
         raise ValueError("Bootstrap is already complete. It cannot replace or add administrators.")
-    key = AuthorityKey(id=uuid4(), user_id=user.id, public_key=private_key.public_key().public_bytes_raw(),
+    settings = settings or Settings()
+    key = AuthorityKey(id=uuid5(NAMESPACE_URL, f"instichain:admin-key:{user.id}"),
+                       user_id=user.id, public_key=private_key.public_key().public_bytes_raw(),
                        purpose="administrator", verified_by_id=user.id, verification_reference=reference)
     db.add(key)
     db.flush()
-    event = append_admin_event(db, key, private_key, "ADMIN_BOOTSTRAPPED", {"user_id": str(user.id)},
+    request_id = uuid5(NAMESPACE_URL, f"instichain:admin-bootstrap:{user.id}")
+    event = append_admin_event(db, key, private_key, settings, request_id, "ADMIN_BOOTSTRAPPED",
+                               {"user_id": str(user.id)},
                                {"public_key": base64.b64encode(key.public_key).decode("ascii")})
-    admin = Administrator(id=1, user_id=user.id, key_id=key.id, bootstrap_transaction_id=event.transaction_id)
+    admin = Administrator(id=1, user_id=user.id, key_id=key.id,
+                          bootstrap_transaction_id=event.request_id)
     db.add(admin)
     db.flush()
     return admin
@@ -78,10 +84,10 @@ def main() -> None:
             return
         private_key = load_signing_key(Settings().admin_signing_key_file)
         with Session(get_engine()) as db, db.begin():
-            admin = bootstrap_admin(db, args.email, args.verification_reference, private_key)
+            admin = bootstrap_admin(db, args.email, args.verification_reference, private_key, Settings())
             user_id = admin.user_id
         print(f"Administrator ready: {user_id}")
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, FabricUnavailable) as exc:
         parser.exit(1, f"{exc}\n")
     except SQLAlchemyError:
         parser.exit(1, "Database operation failed. Check connectivity and apply migrations.\n")

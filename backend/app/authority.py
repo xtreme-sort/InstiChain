@@ -1,23 +1,29 @@
-"""Server-signed administration events; advisor credential signing comes later."""
+"""Administrator signatures and Hyperledger Fabric transaction submission."""
 
 import base64
-import hashlib
-from datetime import timezone
+from datetime import datetime
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID
 
+import httpx
 import rfc8785
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy import func, select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import AuthorityKey, LedgerEntry
+from app.config import Settings
+from app.models import AuthorityKey, FabricTransaction
 
 LEDGER_LOCK = 50130001
 
 
+class FabricUnavailable(RuntimeError):
+    """Raised when a transaction cannot be confirmed on Fabric."""
+
+
 def lock_ledger(db: Session) -> None:
+    """Serialize local projections; Fabric provides authoritative ordering."""
     db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LEDGER_LOCK})
 
 
@@ -32,41 +38,92 @@ def load_signing_key(path: Path | None) -> Ed25519PrivateKey:
     return key
 
 
-def action_document(entry: LedgerEntry) -> dict:
+def action_document(request_id: UUID, event_type: str, object_ids: dict, payload: dict,
+                    actor_id: UUID, actor_key_id: UUID) -> dict:
     return {
-        "schema_version": entry.schema_version,
-        "transaction_id": str(entry.transaction_id), "event_type": entry.event_type,
-        "object_ids": entry.object_ids, "payload": entry.payload,
-        "actor_id": str(entry.actor_id), "actor_key_id": str(entry.actor_key_id),
+        "request_id": str(request_id),
+        "event_type": event_type,
+        "object_ids": object_ids,
+        "payload": payload,
+        "actor_id": str(actor_id),
+        "actor_key_id": str(actor_key_id),
     }
 
 
-def entry_document(entry: LedgerEntry) -> dict:
-    return action_document(entry) | {
-        "sequence": entry.sequence,
-        "signature": base64.b64encode(entry.signature).decode("ascii"),
-        "committed_at": entry.committed_at.astimezone(timezone.utc).isoformat(),
-        "previous_entry_hash": entry.previous_entry_hash,
-    }
+class FabricClient:
+    def __init__(self, settings: Settings, client: httpx.Client | None = None):
+        self.settings = settings
+        self.client = client
+
+    def submit(self, document: dict) -> dict:
+        secret = self.settings.fabric_bridge_token
+        if secret is None:
+            raise FabricUnavailable("Configure INSTICHAIN_FABRIC_BRIDGE_TOKEN first.")
+        url = str(self.settings.fabric_bridge_url).rstrip("/") + "/transactions"
+
+        def send(client: httpx.Client) -> httpx.Response:
+            return client.post(url, json=document, headers={
+                "Authorization": f"Bearer {secret.get_secret_value()}",
+            })
+
+        try:
+            if self.client is not None:
+                response = send(self.client)
+            else:
+                with httpx.Client(timeout=70, follow_redirects=False) as client:
+                    response = send(client)
+            response.raise_for_status()
+            receipt = response.json()
+        except (httpx.HTTPError, ValueError, OSError) as exc:
+            raise FabricUnavailable("Fabric did not confirm the transaction.") from exc
+        if (receipt.get("request_id") != document["request_id"] or
+                receipt.get("event_type") != document["event_type"] or
+                not receipt.get("fabric_transaction_id")):
+            raise FabricUnavailable("Fabric returned an invalid transaction receipt.")
+        return receipt
 
 
 def append_admin_event(db: Session, key: AuthorityKey, private_key: Ed25519PrivateKey,
-                       event_type: str, object_ids: dict, payload: dict) -> LedgerEntry:
+                       settings: Settings, request_id: UUID, event_type: str,
+                       object_ids: dict, payload: dict,
+                       client: FabricClient | None = None) -> FabricTransaction:
     lock_ledger(db)
     if key.purpose != "administrator" or key.revoked_at is not None:
         raise ValueError("Administrator signing key is inactive.")
     if private_key.public_key().public_bytes_raw() != key.public_key:
         raise ValueError("Configured signing key does not match the registered key.")
-    previous = db.scalar(select(LedgerEntry).order_by(LedgerEntry.sequence.desc()).limit(1))
-    entry = LedgerEntry(
-        sequence=previous.sequence + 1 if previous else 1, transaction_id=uuid4(),
-        schema_version=1, event_type=event_type, object_ids=object_ids, payload=payload,
-        actor_id=key.user_id, actor_key_id=key.id,
-        committed_at=db.scalar(select(func.clock_timestamp())),
-        previous_entry_hash=previous.entry_hash if previous else None,
+    existing = db.get(FabricTransaction, request_id)
+    if existing is not None:
+        if (existing.event_type != event_type or existing.object_ids != object_ids or
+                existing.payload != payload or existing.actor_id != key.user_id or
+                existing.actor_key_id != key.id):
+            raise ValueError("The Fabric request ID is already bound to another event.")
+        return existing
+
+    action = action_document(request_id, event_type, object_ids, payload, key.user_id, key.id)
+    signature = private_key.sign(rfc8785.dumps(action))
+    receipt = (client or FabricClient(settings)).submit(action | {
+        "signature": base64.b64encode(signature).decode("ascii"),
+    })
+    transaction = FabricTransaction(
+        request_id=request_id,
+        source="fabric",
+        sequence=int(receipt["sequence"]),
+        fabric_transaction_id=receipt["fabric_transaction_id"],
+        submitted_transaction_id=receipt.get("submitted_transaction_id"),
+        channel_name=settings.fabric_channel_name,
+        chaincode_name=settings.fabric_chaincode_name,
+        block_number=int(receipt["block_number"]),
+        validation_code=int(receipt["validation_code"]),
+        schema_version=int(receipt.get("schema_version", 1)),
+        event_type=event_type,
+        object_ids=object_ids,
+        payload=payload,
+        actor_id=key.user_id,
+        actor_key_id=key.id,
+        signature=signature,
+        committed_at=datetime.fromisoformat(receipt["committed_at"].replace("Z", "+00:00")),
     )
-    entry.signature = private_key.sign(rfc8785.dumps(action_document(entry)))
-    entry.entry_hash = hashlib.sha256(rfc8785.dumps(entry_document(entry))).hexdigest()
-    db.add(entry)
+    db.add(transaction)
     db.flush()
-    return entry
+    return transaction

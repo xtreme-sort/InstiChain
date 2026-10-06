@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     smtp_password: SecretStr | None = None
     smtp_from: str = "InstiChain <no-reply@instichain.local>"
     admin_signing_key_file: Path | None = None
+    fabric_bridge_url: AnyHttpUrl = "http://127.0.0.1:3001"
+    fabric_bridge_token: SecretStr | None = None
+    fabric_channel_name: str = "instichain"
+    fabric_chaincode_name: str = "instichain"
     drive_test_access_token: SecretStr | None = None
     drive_test_file_id: str | None = None
 
