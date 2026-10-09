@@ -33,8 +33,13 @@ case "$ACTION" in
         require_docker
         [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
         [[ -f "$ROOT/fabric/chaincode/package-lock.json" ]] || { echo "Run npm install in fabric/chaincode first." >&2; exit 1; }
+        if [[ "$(docker inspect --format '{{.State.Running}}' peer0.org1.example.com 2>/dev/null || true)" == true &&
+              "$(docker inspect --format '{{.State.Running}}' peer0.org2.example.com 2>/dev/null || true)" == true &&
+              "$(docker inspect --format '{{.State.Running}}' orderer.example.com 2>/dev/null || true)" == true ]]; then
+            echo "Fabric network is already running; the existing ledger was preserved."
+            exit 0
+        fi
         cd "$NETWORK"
-        ./network.sh down
         ./network.sh up createChannel -ca -c instichain
         ./network.sh deployCC -c instichain -ccn instichain \
             -ccp "$ROOT/fabric/chaincode" -ccl javascript \

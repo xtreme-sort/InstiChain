@@ -15,7 +15,7 @@ keys do not cascade deletes, preserving references to historical records.
 | `appointments` | Club, appointed user, grantor, position, start/end times and grant/revocation ledger references. Supports faculty advisors, heads and office bearers. |
 | `competitions` | Owning club, creator, title, description and scheduled start/end times. |
 | `credentials` | Competition, recipient, approving advisor, award, shared result ID, submission version, SHA-256 proof digest and issuance/revocation references. A replacement points to the credential it supersedes. |
-| `ledger_entries` | Explicit sequence, unique transaction ID, schema version, event type, JSONB object IDs/payload, actor/key IDs, Ed25519 signature bytes, commit timestamp and chain hashes. |
+| `ledger_entries` | Archived pre-Fabric hash-chain rows. Retained only to preserve migration history; the application never writes this table. |
 | `fabric_transactions` | Added by `0005`: Fabric request and transaction IDs, block/validation receipt, signed event projection and channel/chaincode identity. Legacy hash-chain rows are copied here for reference. |
 
 ## Constraints

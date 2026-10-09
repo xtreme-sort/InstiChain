@@ -102,7 +102,9 @@ class Club(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class LedgerEntry(Base):
+class LegacyLedgerEntry(Base):
+    """Archived pre-Fabric hash-chain rows; the application never writes these."""
+
     __tablename__ = "ledger_entries"
     __table_args__ = (
         CheckConstraint("sequence > 0", name="positive_sequence"),

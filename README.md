@@ -2,6 +2,9 @@
 
 Faculty-authorized campus competition records and achievement verification.
 
+Start with [Architecture and code map](docs/ARCHITECTURE.md) to see which data
+belongs in Fabric, PostgreSQL and external services, and where each feature lives.
+
 The project provides a React + TypeScript frontend, a FastAPI backend,
 configuration templates, institute email verification, session-based login and a
 Hyperledger Fabric ledger for administrator events. PostgreSQL stores accounts,
@@ -56,12 +59,28 @@ After installing dependencies, run these from the repository root in two separat
 terminals:
 
 ```bash
+make docker
+```
+
+This starts the Docker daemon through systemd on a systemd host or the traditional
+`service` command on WSL/Linux without systemd. Docker Desktop users should open
+Docker Desktop instead. Confirm availability with `make status-docker`.
+
+```bash
 make backend
 ```
 
 ```bash
 make frontend
 ```
+
+Start the local email inbox in either terminal:
+
+```bash
+make mailpit
+```
+
+Open Mailpit at <http://127.0.0.1:8025>.
 
 Each command stops existing servers for that service in this checkout, then
 starts a fresh foreground server. The backend runs at <http://127.0.0.1:8000>
@@ -72,12 +91,14 @@ Use `Ctrl+C` in the terminal to stop its server, or run:
 make stop           # Stop both app servers
 make stop-backend   # Stop only the backend
 make stop-frontend  # Stop only the frontend
-make status        # Show project server PIDs
+make stop-mailpit   # Stop the local email server
+make status         # Show project server PIDs
+make status-mailpit # Show the Mailpit container status
 ```
 
-You can also run `bash scripts/backend.sh start` or
-`bash scripts/frontend.sh start` directly. Both scripts accept `stop` and `status`.
-They identify same-user Vite/Uvicorn processes by this checkout's working directory,
+You can also run `bash scripts/dev.sh backend start` or
+`bash scripts/dev.sh frontend start` directly; replace `start` with `stop` or
+`status` as needed. The runner identifies same-user Vite/Uvicorn processes by this checkout's working directory,
 including servers started manually, and stop their child processes. Unrelated
 processes occupying the ports are left alone and cause startup to fail clearly.
 PostgreSQL and Mailpit containers are not stopped or restarted. These commands do
@@ -324,8 +345,8 @@ commands are not a production deployment configuration.
 ## Git
 
 Commit source files, `.env.example` templates and `frontend/package-lock.json`.
-Local `.env` files, dependencies, build output and `IMPLEMENTATION_PLAN.md` are
-ignored. No credentials are needed or included in this scaffold.
+Local `.env` files, dependencies, build output and private planning notes are
+ignored. No credentials are included in the repository.
 
 ## Framework References
 

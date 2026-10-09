@@ -61,8 +61,10 @@ make frontend
 ```
 
 The first command creates the `instichain` channel and deploys the JavaScript
-chaincode with policy `AND('Org1MSP.peer','Org2MSP.peer')`. The gateway bridge is
-bound to `127.0.0.1:3001` and accepts only the shared bearer token.
+chaincode with policy `AND('Org1MSP.peer','Org2MSP.peer')`. When that network is
+already running, the command leaves it untouched so its ledger is preserved. The
+gateway bridge is bound to `127.0.0.1:3001` and accepts only the shared bearer
+token.
 
 Check the live ledger through FastAPI:
 
@@ -74,6 +76,7 @@ curl http://127.0.0.1:8000/api/ledger/events
 Create a club or appoint an advisor from the UI, then repeat the events request.
 Each result includes Fabric's transaction ID, submitting MSP and commit time.
 
-Stop and remove the disposable Fabric network with `make fabric-down`. Recreating
-it produces new development identities and an empty ledger, so do not use this
-command for a network containing data you need.
+`make fabric-down` permanently removes the disposable Fabric network, its
+identities and its ledger. A later `make fabric-up` creates an empty blockchain,
+so do not run `make fabric-down` when the development ledger contains data you
+need. Stop Docker itself when you merely want to pause the network.

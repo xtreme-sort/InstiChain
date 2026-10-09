@@ -14,7 +14,10 @@ from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base
-from app.models import Appointment, Club, Competition, Credential, FabricTransaction, LedgerEntry, Session, User
+from app.models import (
+    Appointment, Club, Competition, Credential, FabricTransaction,
+    LegacyLedgerEntry, Session, User,
+)
 
 
 @unittest.skipUnless(os.getenv("INSTICHAIN_TEST_DATABASE_URL"), "Set INSTICHAIN_TEST_DATABASE_URL to run PostgreSQL tests")
@@ -196,18 +199,18 @@ class MigrationTests(unittest.TestCase):
         for overrides, constraint in cases:
             with self.subTest(constraint=constraint):
                 values = self.ledger_values(**overrides)
-                self.reject(LedgerEntry.__table__.insert().values(**values), constraint)
+                self.reject(LegacyLedgerEntry.__table__.insert().values(**values), constraint)
 
     def test_ledger_rejects_mutation(self):
-        self.connection.execute(LedgerEntry.__table__.insert().values(**self.ledger_values()))
+        self.connection.execute(LegacyLedgerEntry.__table__.insert().values(**self.ledger_values()))
         for statement in [
-            LedgerEntry.__table__.update().values(event_type="CHANGED"),
-            LedgerEntry.__table__.delete(),
+            LegacyLedgerEntry.__table__.update().values(event_type="CHANGED"),
+            LegacyLedgerEntry.__table__.delete(),
             text("TRUNCATE ledger_entries CASCADE"),
         ]:
             with self.subTest(statement=str(statement)):
                 self.reject(statement, error=DBAPIError)
-        self.assertEqual(self.connection.scalar(select(func.count()).select_from(LedgerEntry)), 1)
+        self.assertEqual(self.connection.scalar(select(func.count()).select_from(LegacyLedgerEntry)), 1)
 
 
 if __name__ == "__main__":
