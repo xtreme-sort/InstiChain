@@ -235,7 +235,7 @@ class MigrationTests(unittest.TestCase):
         values = self.credential_values()
         self.insert(Credential, **values)
         other = self.insert(User, email="other@iitm.ac.in", display_name="Other")
-        self.insert(Credential, **(values | {"recipient_id": other, "issuance_transaction_id": self.append()}))
+        self.insert(Credential, **(values | {"recipient_id": other}))
         self.reject(Credential.__table__.insert().values(**(values | {"issuance_transaction_id": self.append()})),
                     "uq_credentials_result_version_recipient")
         self.assertEqual(self.connection.scalar(select(func.count()).select_from(Credential)), 2)

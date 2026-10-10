@@ -280,7 +280,9 @@ class Credential(Base):
     result_id: Mapped[UUID]
     submission_version: Mapped[int] = mapped_column(Integer)
     proof_digest: Mapped[str] = mapped_column(String(64))
-    issuance_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
+    issuance_transaction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("fabric_transactions.request_id"), index=True,
+    )
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)

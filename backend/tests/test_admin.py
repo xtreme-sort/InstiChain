@@ -25,7 +25,7 @@ from app.config import Settings
 from app.database import get_session
 from app.main import app
 from app.models import (
-    Administrator, Appointment, AuthorityKey, Club, Competition,
+    Administrator, Appointment, AuthorityKey, Club, Competition, Credential,
     FabricTransaction, ResultRecipient, ResultSubmission, User,
 )
 from app.permissions import active_appointments, permission_settings
@@ -196,6 +196,24 @@ class AdminTests(unittest.TestCase):
             proof_digest="a" * 64,
             recipient_emails=["student@iitm.ac.in", "admin@iitm.ac.in"],
         ) | overrides
+
+    def prepare_issuance(self, club, competition, result_id, version):
+        path = (
+            f"/api/clubs/{club}/competitions/{competition}/results/"
+            f"{result_id}/versions/{version}/issuance"
+        )
+        response = self.client.post(f"{path}/prepare")
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return path, prepared
+
+    def submit_issuance(self, path, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(path, json={
+            "document": prepared["document"],
+            "signature": base64.b64encode(signature).decode(),
+        })
 
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
@@ -661,6 +679,120 @@ class AdminTests(unittest.TestCase):
             f"{path}/{first['result_id']}/versions",
             json=self.result_body(proof_digest="b" * 64),
         ).status_code, 403)
+
+    def test_advisor_issues_team_credentials_on_fabric_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        submission = self.client.post(result_path, json=self.result_body()).json()
+        self.assertEqual(self.client.post(
+            f"{result_path}/{submission['result_id']}/versions/1/issuance/prepare",
+        ).status_code, 403)
+
+        self.login("advisor")
+        path, prepared = self.prepare_issuance(
+            club, competition["id"], submission["result_id"], 1,
+        )
+        response = self.submit_issuance(path, prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        issued = response.json()
+        self.assertEqual(len(issued["credentials"]), 2)
+        self.assertEqual(self.submit_issuance(path, prepared).json(), issued)
+
+        with Session(self.engine) as db:
+            credentials = db.scalars(select(Credential).order_by(Credential.recipient_id)).all()
+            self.assertEqual(len(credentials), 2)
+            self.assertEqual(len({item.issuance_transaction_id for item in credentials}), 1)
+            event = db.get(FabricTransaction, credentials[0].issuance_transaction_id)
+            key = db.get(AuthorityKey, event.actor_key_id)
+            self.assertEqual(event.event_type, "ACHIEVEMENT_ISSUED")
+            self.assertEqual(len(event.payload["claims"]), 2)
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+    def test_credential_issuance_rejects_tampering_and_rolls_back_fabric_failure(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        submission = self.client.post(result_path, json=self.result_body()).json()
+        self.login("advisor")
+        path, prepared = self.prepare_issuance(
+            club, competition["id"], submission["result_id"], 1,
+        )
+
+        self.assertEqual(self.submit_issuance(path, prepared, bytes(64)).status_code, 422)
+        tampered = prepared["document"] | {
+            "payload": prepared["document"]["payload"] | {"award": "Tampered"},
+        }
+        signature = self.advisor_private_key.sign(rfc8785.dumps(tampered))
+        self.assertEqual(self.client.post(path, json={
+            "document": tampered,
+            "signature": base64.b64encode(signature).decode(),
+        }).status_code, 422)
+        self.assertEqual(self.client.post(
+            path.replace(f"clubs/{club}", f"clubs/{other_club}"),
+            json={
+                "document": prepared["document"],
+                "signature": base64.b64encode(signature).decode(),
+            },
+        ).status_code, 403)
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(self.submit_issuance(path, prepared).status_code, 503)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Credential)), 0)
+
+    def test_corrected_result_credentials_supersede_previous_version(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        first = self.client.post(result_path, json=self.result_body()).json()
+        self.login("advisor")
+        first_path, first_prepared = self.prepare_issuance(
+            club, competition["id"], first["result_id"], 1,
+        )
+        first_issued = self.submit_issuance(first_path, first_prepared).json()
+
+        self.login("student")
+        second = self.client.post(
+            f"{result_path}/{first['result_id']}/versions",
+            json=self.result_body(award="Corrected winners", proof_digest="b" * 64),
+        ).json()
+        self.login("advisor")
+        second_path, second_prepared = self.prepare_issuance(
+            club, competition["id"], second["result_id"], 2,
+        )
+        second_issued = self.submit_issuance(second_path, second_prepared)
+        self.assertEqual(second_issued.status_code, 201, second_issued.text)
+        previous_ids = {item["id"] for item in first_issued["credentials"]}
+        self.assertEqual(
+            {item["supersedes_id"] for item in second_issued.json()["credentials"]},
+            previous_ids,
+        )
+        self.assertEqual(
+            set(second_prepared["document"]["payload"]["superseded_credential_ids"]),
+            previous_ids,
+        )
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()
