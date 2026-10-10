@@ -125,6 +125,65 @@ class RoleGrantResponse(BaseModel):
     ends_at: AwareDatetime
 
 
+class RoleAppointmentResponse(RoleGrantResponse):
+    email: str
+    display_name: str
+    status: Literal["scheduled", "active", "expired", "revoked"]
+    revoked_at: AwareDatetime | None
+
+
+class RoleRevocationDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class RoleRevocationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    position: Literal["club_head", "office_bearer"]
+    grant_transaction_id: UUID
+    reason: str = Field(min_length=1, max_length=500)
+    prepared_at: AwareDatetime
+    revoked_at: AwareDatetime
+
+
+class RoleRevocationDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    event_type: Literal["ROLE_REVOKED"]
+    object_ids: RoleObjectIds
+    payload: RoleRevocationPayload
+    actor_id: UUID
+    actor_key_id: UUID
+
+
+class RoleRevocationPreparation(BaseModel):
+    document: RoleRevocationDocument
+    signing_payload: str
+
+
+class RoleRevocationSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document: RoleRevocationDocument
+    signature: str
+
+    @field_validator("signature")
+    @classmethod
+    def ed25519_signature(cls, value: str) -> str:
+        try:
+            signature = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("Provide a base64 Ed25519 signature") from None
+        if len(signature) != 64:
+            raise ValueError("Provide a 64-byte Ed25519 signature")
+        return base64.b64encode(signature).decode("ascii")
+
+
+class RoleRevocationResponse(BaseModel):
+    appointment_id: UUID
+    revocation_transaction_id: UUID
+    revoked_at: AwareDatetime
+
+
 def club_response(authority: ClubAuthority) -> AdvisorClubResponse:
     return AdvisorClubResponse(
         id=authority.club.id,
@@ -137,7 +196,7 @@ def club_response(authority: ClubAuthority) -> AdvisorClubResponse:
     )
 
 
-def document_dict(document: RoleGrantDocument) -> dict:
+def document_dict(document: BaseModel) -> dict:
     return document.model_dump(mode="json")
 
 
@@ -158,6 +217,25 @@ def role_grant_response(appointment: Appointment) -> RoleGrantResponse:
         starts_at=appointment.starts_at,
         ends_at=appointment.ends_at,
     )
+
+
+def role_appointment(db: Session, club_id: UUID, appointment_id: UUID) -> Appointment:
+    appointment = db.get(Appointment, appointment_id)
+    if (appointment is None or appointment.club_id != club_id
+            or appointment.position not in {"club_head", "office_bearer"}):
+        raise HTTPException(404, "Club role appointment not found.")
+    return appointment
+
+
+def verify_signature(key: AuthorityKey, document: BaseModel, encoded_signature: str) -> bytes:
+    signature = base64.b64decode(encoded_signature)
+    try:
+        Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+            signature, rfc8785.dumps(document_dict(document)),
+        )
+    except (InvalidSignature, ValueError):
+        raise HTTPException(422, "The advisor signature is invalid.") from None
+    return signature
 
 
 @router.get("/access")
@@ -184,6 +262,28 @@ def assigned_clubs(advisor: Advisor):
 @router.get("/clubs/{club_id}/access", response_model=AdvisorClubResponse)
 def club_access(club_id: UUID, advisor: ClubAdvisor):
     return club_response(advisor)
+
+
+@router.get("/clubs/{club_id}/roles", response_model=list[RoleAppointmentResponse])
+def list_roles(club_id: UUID, advisor: ClubAdvisor, db: Database):
+    now = db.scalar(select(func.clock_timestamp()))
+    rows = db.execute(
+        select(Appointment, User)
+        .join(User, User.id == Appointment.user_id)
+        .where(
+            Appointment.club_id == club_id,
+            Appointment.position.in_(("club_head", "office_bearer")),
+        )
+        .order_by(Appointment.created_at.desc(), Appointment.id)
+    ).all()
+    return [RoleAppointmentResponse(
+        **role_grant_response(appointment).model_dump(),
+        email=user.email,
+        display_name=user.display_name,
+        status="revoked" if appointment.revoked_at else "expired" if appointment.ends_at <= now
+        else "scheduled" if appointment.starts_at > now else "active",
+        revoked_at=appointment.revoked_at,
+    ) for appointment, user in rows]
 
 
 @router.post("/clubs/{club_id}/role-grants/prepare", response_model=RoleGrantPreparation)
@@ -265,12 +365,8 @@ def grant_role(
     if recipient.id == advisor.user.id:
         raise HTTPException(422, "An advisor cannot grant a club role to themselves.")
 
-    signature = base64.b64decode(body.signature)
     action = document_dict(document)
-    try:
-        Ed25519PublicKey.from_public_bytes(key.public_key).verify(signature, rfc8785.dumps(action))
-    except (InvalidSignature, ValueError):
-        raise HTTPException(422, "The advisor signature is invalid.") from None
+    signature = verify_signature(key, document, body.signature)
 
     existing = db.get(Appointment, document.request_id)
     if existing is not None:
@@ -315,3 +411,115 @@ def grant_role(
     db.add(appointment)
     db.commit()
     return role_grant_response(appointment)
+
+
+@router.post(
+    "/clubs/{club_id}/roles/{appointment_id}/revocations/prepare",
+    response_model=RoleRevocationPreparation,
+)
+def prepare_role_revocation(
+    club_id: UUID,
+    appointment_id: UUID,
+    body: RoleRevocationDraft,
+    advisor: ClubAdvisor,
+    db: Database,
+):
+    appointment = role_appointment(db, club_id, appointment_id)
+    now = db.scalar(select(func.clock_timestamp()))
+    if appointment.revoked_at is not None:
+        raise HTTPException(409, "This club role has already been revoked.")
+    if appointment.ends_at <= now:
+        raise HTTPException(409, "This club role has already expired.")
+    key = advisor_key(db, advisor)
+    request_id = uuid5(
+        NAMESPACE_URL,
+        f"instichain:role-revocation:{appointment.id}:{now.isoformat()}",
+    )
+    document = RoleRevocationDocument(
+        request_id=request_id,
+        event_type="ROLE_REVOKED",
+        object_ids=RoleObjectIds(
+            club_id=club_id,
+            appointment_id=appointment.id,
+            user_id=appointment.user_id,
+        ),
+        payload=RoleRevocationPayload(
+            position=appointment.position,
+            grant_transaction_id=appointment.grant_transaction_id,
+            reason=body.reason,
+            prepared_at=now,
+            revoked_at=now,
+        ),
+        actor_id=advisor.user.id,
+        actor_key_id=key.id,
+    )
+    return RoleRevocationPreparation(
+        document=document,
+        signing_payload=base64.b64encode(rfc8785.dumps(document_dict(document))).decode("ascii"),
+    )
+
+
+@router.post(
+    "/clubs/{club_id}/roles/{appointment_id}/revocations",
+    status_code=201,
+    response_model=RoleRevocationResponse,
+)
+def revoke_role(
+    club_id: UUID,
+    appointment_id: UUID,
+    body: RoleRevocationSubmission,
+    advisor: ClubAdvisor,
+    db: Database,
+    settings: Configuration,
+):
+    document = body.document
+    objects = document.object_ids
+    payload = document.payload
+    key = advisor_key(db, advisor)
+    if (objects.club_id != club_id or objects.appointment_id != appointment_id
+            or document.actor_id != advisor.user.id or document.actor_key_id != key.id):
+        raise HTTPException(422, "The signed revocation does not match this advisor and club role.")
+    expected_id = uuid5(
+        NAMESPACE_URL,
+        f"instichain:role-revocation:{appointment_id}:{payload.revoked_at.isoformat()}",
+    )
+    if expected_id != document.request_id or payload.prepared_at != payload.revoked_at:
+        raise HTTPException(422, "The signed revocation has invalid identifiers or timestamps.")
+    signature = verify_signature(key, document, body.signature)
+    appointment = role_appointment(db, club_id, appointment_id)
+    if (objects.user_id != appointment.user_id or payload.position != appointment.position
+            or payload.grant_transaction_id != appointment.grant_transaction_id):
+        raise HTTPException(422, "The signed revocation does not match the stored club role.")
+
+    if appointment.revoked_at is not None:
+        if (appointment.revocation_transaction_id == document.request_id
+                and appointment.revoked_at == payload.revoked_at):
+            return RoleRevocationResponse(
+                appointment_id=appointment.id,
+                revocation_transaction_id=appointment.revocation_transaction_id,
+                revoked_at=appointment.revoked_at,
+            )
+        raise HTTPException(409, "This club role has already been revoked.")
+
+    now = db.scalar(select(func.clock_timestamp()))
+    if (payload.prepared_at > now or payload.prepared_at < now - timedelta(minutes=10)
+            or appointment.ends_at <= now):
+        raise HTTPException(422, "The signed revocation has expired or the club role is inactive.")
+    action = document_dict(document)
+    try:
+        event = append_signed_event(
+            db, key, signature, settings, document.request_id, document.event_type,
+            action["object_ids"], action["payload"], "advisor",
+        )
+    except FabricUnavailable:
+        raise HTTPException(503, "The Fabric ledger is unavailable; no role was revoked.") from None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    appointment.revoked_at = payload.revoked_at
+    appointment.revocation_transaction_id = event.request_id
+    db.commit()
+    return RoleRevocationResponse(
+        appointment_id=appointment.id,
+        revocation_transaction_id=event.request_id,
+        revoked_at=appointment.revoked_at,
+    )

@@ -25,7 +25,7 @@ from app.config import Settings
 from app.database import get_session
 from app.main import app
 from app.models import Administrator, Appointment, AuthorityKey, Club, FabricTransaction, User
-from app.permissions import permission_settings
+from app.permissions import active_appointments, permission_settings
 from app.session import SESSION_COOKIE, create_session
 
 
@@ -150,6 +150,26 @@ class AdminTests(unittest.TestCase):
             "document": prepared["document"],
             "signature": base64.b64encode(signature).decode(),
         })
+
+    def prepare_revocation(self, club, appointment, reason="Annual club handover"):
+        response = self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{appointment}/revocations/prepare",
+            json={"reason": reason},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return prepared
+
+    def submit_revocation(self, club, appointment, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{appointment}/revocations",
+            json={
+                "document": prepared["document"],
+                "signature": base64.b64encode(signature).decode(),
+            },
+        )
 
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
@@ -354,6 +374,99 @@ class AdminTests(unittest.TestCase):
                 Appointment.position.in_(("club_head", "office_bearer")),
             )).all()
             self.assertEqual(len(roles), 1)
+
+    def test_advisor_revokes_signed_role_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+
+        roles = self.client.get(f"/api/advisor/clubs/{club}/roles")
+        self.assertEqual(roles.status_code, 200, roles.text)
+        self.assertEqual(roles.json()[0]["status"], "active")
+        prepared = self.prepare_revocation(club, granted["id"])
+        response = self.submit_revocation(club, granted["id"], prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).json(), response.json())
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{club}/roles").json()[0]["status"],
+            "revoked",
+        )
+
+        with Session(self.engine) as db:
+            appointment = db.get(Appointment, granted["id"])
+            event = db.get(FabricTransaction, appointment.revocation_transaction_id)
+            key = db.get(AuthorityKey, appointment.advisor_key_id)
+            self.assertIsNotNone(appointment.revoked_at)
+            self.assertEqual(active_appointments(
+                db, self.users["student"], ("club_head",), appointment.club_id,
+            ), ())
+            self.assertEqual(event.event_type, "ROLE_REVOKED")
+            self.assertEqual(event.payload["reason"], "Annual club handover")
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+        successor = self.submit_role(
+            club,
+            self.prepare_role(club, email="admin@iitm.ac.in"),
+        )
+        self.assertEqual(successor.status_code, 201, successor.text)
+
+    def test_role_revocation_rejects_wrong_scope_target_and_signature(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        advisor_appointment = self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{other_club}/roles/{granted['id']}/revocations/prepare",
+            json={"reason": "Wrong club"},
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{advisor_appointment}/revocations/prepare",
+            json={"reason": "Not permitted"},
+        ).status_code, 404)
+        prepared = self.prepare_revocation(club, granted["id"])
+        self.assertEqual(
+            self.submit_revocation(club, granted["id"], prepared, bytes(64)).status_code,
+            422,
+        )
+        prepared["document"]["payload"]["reason"] = "Tampered reason"
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).status_code, 422)
+
+    def test_role_revocation_rejects_expired_role_and_rolls_back_fabric_failure(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+        prepared = self.prepare_revocation(club, granted["id"])
+
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(
+                self.submit_revocation(club, granted["id"], prepared).status_code,
+                503,
+            )
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(Appointment, granted["id"]).revoked_at)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, granted["id"])
+            appointment.starts_at = self.now - timedelta(days=2)
+            appointment.ends_at = self.now - timedelta(days=1)
+        response = self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{granted['id']}/revocations/prepare",
+            json={"reason": "Too late"},
+        )
+        self.assertEqual(response.status_code, 409)
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()
