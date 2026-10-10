@@ -6,7 +6,7 @@ from sqlalchemy import (
     LargeBinary, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -199,6 +199,7 @@ class Appointment(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    club: Mapped[Club] = relationship()
 
 
 class Competition(Base):

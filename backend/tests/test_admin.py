@@ -120,6 +120,14 @@ class AdminTests(unittest.TestCase):
             starts_at=(self.now - timedelta(minutes=1)).isoformat(),
             ends_at=(self.now + timedelta(days=365)).isoformat()) | overrides
 
+    def appoint_advisor(self, club, **overrides):
+        response = self.client.post(
+            f"/api/admin/clubs/{club}/advisors",
+            json=self.advisor_body(**overrides),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()["id"]
+
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
             self.bootstrap("unverified")
@@ -183,6 +191,63 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/admin/clubs").json()[0]["advisors"][0]["status"], "active")
         self.login("advisor")
         self.assertEqual(self.client.get("/api/admin/access").status_code, 403)
+
+    def test_advisor_access_is_limited_to_assigned_clubs(self):
+        self.bootstrap()
+        assigned_club = self.club()
+        other_club = self.club("robotics")
+        appointment = self.appoint_advisor(assigned_club)
+        self.login("advisor")
+
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 200)
+        response = self.client.get("/api/advisor/clubs")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["id"], assigned_club)
+        self.assertEqual(response.json()[0]["slug"], "coding")
+        self.assertEqual(response.json()[0]["name"], "Coding")
+        self.assertEqual(response.json()[0]["appointment_id"], appointment)
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{assigned_club}/access").status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{other_club}/access").status_code,
+            403,
+        )
+
+    def test_advisor_routes_reject_anonymous_and_ordinary_users(self):
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 401)
+        self.login("student")
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+        self.assertEqual(self.client.get("/api/advisor/clubs").status_code, 403)
+
+    def test_scheduled_expired_and_revoked_advisors_are_denied(self):
+        self.bootstrap()
+        club = self.club()
+        appointment_id = self.appoint_advisor(club)
+        self.login("advisor")
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now + timedelta(days=1)
+            appointment.ends_at = self.now + timedelta(days=2)
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now - timedelta(days=2)
+            appointment.ends_at = self.now - timedelta(days=1)
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now - timedelta(days=1)
+            appointment.ends_at = self.now + timedelta(days=1)
+            appointment.revoked_at = db.scalar(select(func.clock_timestamp()))
+            appointment.revocation_transaction_id = appointment.grant_transaction_id
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()
