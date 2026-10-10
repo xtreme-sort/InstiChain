@@ -1,17 +1,24 @@
 from dataclasses import dataclass
 from typing import Annotated, Callable
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, Response
+from fastapi import Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.authority import lock_ledger
+from app.config import Settings
 from app.database import get_session
 from app.models import Appointment, Club, User
 from app.session import current_user
 
 ADVISOR = "faculty_advisor"
 CLUB_ROLES = frozenset({ADVISOR, "club_head", "office_bearer"})
+
+
+def permission_settings() -> Settings:
+    return Settings()
 
 
 @dataclass(frozen=True)
@@ -66,11 +73,18 @@ def require_club_role(*positions: str) -> Callable[..., ClubAuthority]:
 
     def dependency(
         club_id: UUID,
+        request: Request,
         response: Response,
         user: Annotated[User, Depends(current_user)],
         db: Annotated[Session, Depends(get_session)],
+        settings: Annotated[Settings, Depends(permission_settings)],
     ) -> ClubAuthority:
         response.headers["Cache-Control"] = "no-store"
+        if request.method != "GET":
+            origin = urlsplit(str(settings.public_app_url))
+            if request.headers.get("origin") != f"{origin.scheme}://{origin.netloc}":
+                raise HTTPException(403, "A same-origin request is required.")
+            lock_ledger(db)
         club = db.get(Club, club_id)
         if club is None:
             raise HTTPException(404, "Club not found.")

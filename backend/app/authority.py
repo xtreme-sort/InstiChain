@@ -8,7 +8,8 @@ from uuid import UUID
 import httpx
 import rfc8785
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -83,25 +84,27 @@ class FabricClient:
         return receipt
 
 
-def append_admin_event(db: Session, key: AuthorityKey, private_key: Ed25519PrivateKey,
-                       settings: Settings, request_id: UUID, event_type: str,
-                       object_ids: dict, payload: dict,
-                       client: FabricClient | None = None) -> FabricTransaction:
+def append_signed_event(db: Session, key: AuthorityKey, signature: bytes, settings: Settings,
+                        request_id: UUID, event_type: str, object_ids: dict, payload: dict,
+                        purpose: str, client: FabricClient | None = None) -> FabricTransaction:
     lock_ledger(db)
-    if key.purpose != "administrator" or key.revoked_at is not None:
-        raise ValueError("Administrator signing key is inactive.")
-    if private_key.public_key().public_bytes_raw() != key.public_key:
-        raise ValueError("Configured signing key does not match the registered key.")
+    if key.purpose != purpose or key.revoked_at is not None:
+        raise ValueError(f"{purpose.title()} signing key is inactive.")
+
+    action = action_document(request_id, event_type, object_ids, payload, key.user_id, key.id)
+    try:
+        Ed25519PublicKey.from_public_bytes(key.public_key).verify(signature, rfc8785.dumps(action))
+    except (InvalidSignature, ValueError):
+        raise ValueError("The event signature is invalid.") from None
+
     existing = db.get(FabricTransaction, request_id)
     if existing is not None:
         if (existing.event_type != event_type or existing.object_ids != object_ids or
                 existing.payload != payload or existing.actor_id != key.user_id or
-                existing.actor_key_id != key.id):
+                existing.actor_key_id != key.id or existing.signature != signature):
             raise ValueError("The Fabric request ID is already bound to another event.")
         return existing
 
-    action = action_document(request_id, event_type, object_ids, payload, key.user_id, key.id)
-    signature = private_key.sign(rfc8785.dumps(action))
     receipt = (client or FabricClient(settings)).submit(action | {
         "signature": base64.b64encode(signature).decode("ascii"),
     })
@@ -127,3 +130,16 @@ def append_admin_event(db: Session, key: AuthorityKey, private_key: Ed25519Priva
     db.add(transaction)
     db.flush()
     return transaction
+
+
+def append_admin_event(db: Session, key: AuthorityKey, private_key: Ed25519PrivateKey,
+                       settings: Settings, request_id: UUID, event_type: str,
+                       object_ids: dict, payload: dict,
+                       client: FabricClient | None = None) -> FabricTransaction:
+    if private_key.public_key().public_bytes_raw() != key.public_key:
+        raise ValueError("Configured signing key does not match the registered key.")
+    action = action_document(request_id, event_type, object_ids, payload, key.user_id, key.id)
+    return append_signed_event(
+        db, key, private_key.sign(rfc8785.dumps(action)), settings,
+        request_id, event_type, object_ids, payload, "administrator", client,
+    )

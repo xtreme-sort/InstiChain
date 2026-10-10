@@ -19,12 +19,13 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
 
 from app.admin import admin_settings
-from app.authority import FabricClient, action_document
+from app.authority import FabricClient, FabricUnavailable, action_document
 from app.bootstrap import bootstrap_admin
 from app.config import Settings
 from app.database import get_session
 from app.main import app
 from app.models import Administrator, Appointment, AuthorityKey, Club, FabricTransaction, User
+from app.permissions import permission_settings
 from app.session import SESSION_COOKIE, create_session
 
 
@@ -88,6 +89,7 @@ class AdminTests(unittest.TestCase):
 
         app.dependency_overrides[get_session] = sessions
         app.dependency_overrides[admin_settings] = lambda: self.settings
+        app.dependency_overrides[permission_settings] = lambda: self.settings
         self.addCleanup(app.dependency_overrides.clear)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -114,8 +116,9 @@ class AdminTests(unittest.TestCase):
         return response.json()["id"]
 
     def advisor_body(self, **overrides):
+        self.advisor_private_key = Ed25519PrivateKey.generate()
         return dict(email="advisor@iitm.ac.in", public_key=base64.b64encode(
-            Ed25519PrivateKey.generate().public_key().public_bytes_raw()).decode(),
+            self.advisor_private_key.public_key().public_bytes_raw()).decode(),
             verification_reference="Faculty directory confirmation 002",
             starts_at=(self.now - timedelta(minutes=1)).isoformat(),
             ends_at=(self.now + timedelta(days=365)).isoformat()) | overrides
@@ -127,6 +130,26 @@ class AdminTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 201, response.text)
         return response.json()["id"]
+
+    def prepare_role(self, club, **overrides):
+        body = dict(
+            email="student@iitm.ac.in",
+            position="club_head",
+            starts_at=(self.now - timedelta(minutes=1)).isoformat(),
+            ends_at=(self.now + timedelta(days=180)).isoformat(),
+        ) | overrides
+        response = self.client.post(f"/api/advisor/clubs/{club}/role-grants/prepare", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return prepared
+
+    def submit_role(self, club, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(f"/api/advisor/clubs/{club}/role-grants", json={
+            "document": prepared["document"],
+            "signature": base64.b64encode(signature).decode(),
+        })
 
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
@@ -248,6 +271,89 @@ class AdminTests(unittest.TestCase):
             appointment.revoked_at = db.scalar(select(func.clock_timestamp()))
             appointment.revocation_transaction_id = appointment.grant_transaction_id
         self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+    def test_advisor_grants_signed_club_head_role_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        prepared = self.prepare_role(club)
+        response = self.submit_role(club, prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["position"], "club_head")
+        self.assertEqual(response.json()["user_id"], str(self.users["student"]))
+        self.assertEqual(self.submit_role(club, prepared).json(), response.json())
+
+        with Session(self.engine) as db:
+            appointment = db.get(Appointment, response.json()["id"])
+            event = db.get(FabricTransaction, appointment.grant_transaction_id)
+            key = db.get(AuthorityKey, appointment.advisor_key_id)
+            self.assertEqual(appointment.granted_by_id, self.users["advisor"])
+            self.assertEqual(event.event_type, "ROLE_GRANTED")
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+    def test_role_grants_enforce_scope_origin_recipient_and_signature(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        invalid_role = self.client.post(f"/api/advisor/clubs/{club}/role-grants/prepare", json={
+            "email": "student@iitm.ac.in",
+            "position": "faculty_advisor",
+            "starts_at": self.now.isoformat(),
+            "ends_at": (self.now + timedelta(days=1)).isoformat(),
+        })
+        self.assertEqual(invalid_role.status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{club}/role-grants/prepare",
+            json={
+                "email": "unverified@iitm.ac.in", "position": "club_head",
+                "starts_at": self.now.isoformat(),
+                "ends_at": (self.now + timedelta(days=1)).isoformat(),
+            },
+        ).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{other_club}/role-grants/prepare",
+            json={
+                "email": "student@iitm.ac.in", "position": "club_head",
+                "starts_at": self.now.isoformat(),
+                "ends_at": (self.now + timedelta(days=1)).isoformat(),
+            },
+        ).status_code, 403)
+
+        prepared = self.prepare_role(club)
+        self.assertEqual(self.submit_role(club, prepared, bytes(64)).status_code, 422)
+        self.client.headers["Origin"] = "https://attacker.example"
+        self.assertEqual(self.submit_role(club, prepared).status_code, 403)
+
+    def test_role_grant_overlap_and_fabric_failure_leave_no_partial_role(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        first = self.prepare_role(club)
+        self.assertEqual(self.submit_role(club, first).status_code, 201)
+        overlapping = self.prepare_role(club, email="admin@iitm.ac.in")
+        self.assertEqual(self.submit_role(club, overlapping).status_code, 409)
+
+        office_bearer = self.prepare_role(club, position="office_bearer")
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(self.submit_role(club, office_bearer).status_code, 503)
+        with Session(self.engine) as db:
+            roles = db.scalars(select(Appointment).where(
+                Appointment.position.in_(("club_head", "office_bearer")),
+            )).all()
+            self.assertEqual(len(roles), 1)
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()
