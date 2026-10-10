@@ -24,7 +24,7 @@ from app.bootstrap import bootstrap_admin
 from app.config import Settings
 from app.database import get_session
 from app.main import app
-from app.models import Administrator, Appointment, AuthorityKey, Club, FabricTransaction, User
+from app.models import Administrator, Appointment, AuthorityKey, Club, Competition, FabricTransaction, User
 from app.permissions import active_appointments, permission_settings
 from app.session import SESSION_COOKIE, create_session
 
@@ -170,6 +170,14 @@ class AdminTests(unittest.TestCase):
                 "signature": base64.b64encode(signature).decode(),
             },
         )
+
+    def competition_body(self, **overrides):
+        return dict(
+            title="Inter-IIT Programming Contest",
+            description="Annual team programming competition",
+            starts_at=(self.now + timedelta(days=30)).isoformat(),
+            ends_at=(self.now + timedelta(days=31)).isoformat(),
+        ) | overrides
 
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
@@ -467,6 +475,88 @@ class AdminTests(unittest.TestCase):
             json={"reason": "Too late"},
         )
         self.assertEqual(response.status_code, 409)
+
+    def test_club_head_creates_and_advisor_views_competitions(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.login("student")
+
+        response = self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        competition = response.json()
+        self.assertEqual(competition["club_id"], club)
+        self.assertEqual(competition["created_by_id"], str(self.users["student"]))
+        self.assertEqual(competition["created_by_name"], "student")
+        self.assertEqual(
+            self.client.get(f"/api/clubs/{club}/competitions/{competition['id']}").json(),
+            competition,
+        )
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").json(), [competition])
+
+        self.login("advisor")
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").json(), [competition])
+        with Session(self.engine) as db:
+            stored = db.get(Competition, competition["id"])
+            self.assertEqual(stored.created_by_id, self.users["student"])
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 4)
+            self.assertEqual(db.get(Appointment, role["id"]).position, "club_head")
+
+    def test_office_bearer_can_create_competition(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(
+            club,
+            self.prepare_role(club, position="office_bearer"),
+        ).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(title="Robotics Challenge"),
+        ).status_code, 201)
+
+    def test_competitions_enforce_role_scope_revocation_and_input_ownership(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{other_club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(ends_at=self.now.isoformat()),
+        ).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(created_by_id=str(self.users["admin"])),
+        ).status_code, 422)
+
+        self.login("advisor")
+        prepared = self.prepare_revocation(club, role["id"])
+        self.assertEqual(self.submit_revocation(club, role["id"], prepared).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").status_code, 403)
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()

@@ -99,3 +99,5 @@ def require_club_role(*positions: str) -> Callable[..., ClubAuthority]:
 
 
 require_club_advisor = require_club_role(ADVISOR)
+require_club_officer = require_club_role("club_head", "office_bearer")
+require_club_record_viewer = require_club_role(ADVISOR, "club_head", "office_bearer")
