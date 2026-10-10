@@ -15,8 +15,8 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.database import Base
 from app.models import (
-    Appointment, Club, Competition, Credential, FabricTransaction,
-    LegacyLedgerEntry, Session, User,
+    Appointment, Club, Competition, CompetitionResult, Credential, FabricTransaction,
+    LegacyLedgerEntry, ResultRecipient, ResultSubmission, Session, User,
 )
 
 
@@ -110,6 +110,7 @@ class MigrationTests(unittest.TestCase):
         command.downgrade(self.config, "base")
         self.assertEqual(inspect(self.connection).get_table_names(), ["alembic_version"])
         self.assertIsNone(self.connection.scalar(text("SELECT to_regprocedure('reject_ledger_mutation()')")))
+        self.assertIsNone(self.connection.scalar(text("SELECT to_regprocedure('reject_result_record_mutation()')")))
         command.upgrade(self.config, "head")
         self.assertEqual(compare_metadata(MigrationContext.configure(self.connection), Base.metadata), [])
 
@@ -165,6 +166,70 @@ class MigrationTests(unittest.TestCase):
             club_id=self.club, title="Invalid", created_by_id=self.actor,
             starts_at=self.now, ends_at=self.now - timedelta(days=1),
         ), "ck_competitions_date_order")
+
+    def test_result_versions_recipients_and_digest_constraints(self):
+        result = self.insert(
+            CompetitionResult,
+            competition_id=self.competition,
+            created_by_id=self.actor,
+        )
+        values = dict(
+            result_id=result,
+            version=1,
+            award="First place",
+            proof_digest="a" * 64,
+            submitted_by_id=self.actor,
+        )
+        submission = self.insert(ResultSubmission, **values)
+        self.connection.execute(ResultRecipient.__table__.insert().values(
+            submission_id=submission,
+            recipient_id=self.student,
+        ))
+        self.reject(
+            ResultSubmission.__table__.insert().values(**values),
+            "uq_result_submissions_result_version",
+        )
+        self.reject(
+            ResultSubmission.__table__.insert().values(**(values | {
+                "version": 2,
+                "proof_digest": "invalid",
+            })),
+            "ck_result_submissions_proof_digest_format",
+        )
+        self.reject(
+            ResultRecipient.__table__.insert().values(
+                submission_id=submission,
+                recipient_id=self.student,
+            ),
+            "pk_result_recipients",
+        )
+
+    def test_submitted_result_versions_are_immutable(self):
+        result = self.insert(
+            CompetitionResult,
+            competition_id=self.competition,
+            created_by_id=self.actor,
+        )
+        submission = self.insert(
+            ResultSubmission,
+            result_id=result,
+            version=1,
+            award="First place",
+            proof_digest="a" * 64,
+            submitted_by_id=self.actor,
+        )
+        self.connection.execute(ResultRecipient.__table__.insert().values(
+            submission_id=submission,
+            recipient_id=self.student,
+        ))
+        for statement in [
+            CompetitionResult.__table__.update().values(created_by_id=self.student),
+            ResultSubmission.__table__.update().values(award="Changed"),
+            ResultRecipient.__table__.delete(),
+            text("TRUNCATE result_submissions CASCADE"),
+        ]:
+            with self.subTest(statement=str(statement)):
+                self.reject(statement, error=DBAPIError)
 
     def test_team_credentials_and_duplicate_recipient(self):
         values = self.credential_values()

@@ -24,7 +24,10 @@ from app.bootstrap import bootstrap_admin
 from app.config import Settings
 from app.database import get_session
 from app.main import app
-from app.models import Administrator, Appointment, AuthorityKey, Club, Competition, FabricTransaction, User
+from app.models import (
+    Administrator, Appointment, AuthorityKey, Club, Competition,
+    FabricTransaction, ResultRecipient, ResultSubmission, User,
+)
 from app.permissions import active_appointments, permission_settings
 from app.session import SESSION_COOKIE, create_session
 
@@ -177,6 +180,21 @@ class AdminTests(unittest.TestCase):
             description="Annual team programming competition",
             starts_at=(self.now + timedelta(days=30)).isoformat(),
             ends_at=(self.now + timedelta(days=31)).isoformat(),
+        ) | overrides
+
+    def create_competition(self, club, **overrides):
+        response = self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(**overrides),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def result_body(self, **overrides):
+        return dict(
+            award="First place",
+            proof_digest="a" * 64,
+            recipient_emails=["student@iitm.ac.in", "admin@iitm.ac.in"],
         ) | overrides
 
     def test_bootstrap_verified_only_and_idempotent(self):
@@ -557,6 +575,92 @@ class AdminTests(unittest.TestCase):
             json=self.competition_body(),
         ).status_code, 403)
         self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").status_code, 403)
+
+    def test_club_head_submits_immutable_team_result_versions(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+
+        first = self.client.post(path, json=self.result_body())
+        self.assertEqual(first.status_code, 201, first.text)
+        first = first.json()
+        self.assertEqual(first["version"], 1)
+        self.assertEqual(len(first["recipients"]), 2)
+        second = self.client.post(
+            f"{path}/{first['result_id']}/versions",
+            json=self.result_body(
+                award="Winners",
+                proof_digest="b" * 64,
+                recipient_emails=["student@iitm.ac.in"],
+            ),
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(second.json()["version"], 2)
+        self.assertEqual(second.json()["result_id"], first["result_id"])
+        self.assertEqual(
+            self.client.get(f"{path}/{first['result_id']}/versions/1").json(),
+            first,
+        )
+        self.assertEqual(len(self.client.get(path).json()), 2)
+
+        self.login("advisor")
+        self.assertEqual(len(self.client.get(path).json()), 2)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultSubmission)), 2)
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultRecipient)), 3)
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 4)
+
+    def test_result_submission_validates_recipients_digest_and_club_scope(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+
+        for body in [
+            self.result_body(proof_digest="invalid"),
+            self.result_body(recipient_emails=[]),
+            self.result_body(recipient_emails=["student@iitm.ac.in", "student@iitm.ac.in"]),
+            self.result_body(recipient_emails=["unverified@iitm.ac.in"]),
+            self.result_body(version=7),
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.client.post(path, json=body).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{other_club}/competitions/{competition['id']}/results",
+            json=self.result_body(),
+        ).status_code, 403)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultSubmission)), 0)
+
+    def test_revoked_officer_cannot_submit_new_result_version(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        first = self.client.post(path, json=self.result_body()).json()
+
+        self.login("advisor")
+        prepared = self.prepare_revocation(club, role["id"])
+        self.assertEqual(self.submit_revocation(club, role["id"], prepared).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"{path}/{first['result_id']}/versions",
+            json=self.result_body(proof_digest="b" * 64),
+        ).status_code, 403)
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()

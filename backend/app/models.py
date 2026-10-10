@@ -219,6 +219,42 @@ class Competition(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CompetitionResult(Base):
+    __tablename__ = "competition_results"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    competition_id: Mapped[UUID] = mapped_column(ForeignKey("competitions.id"), index=True)
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResultSubmission(Base):
+    __tablename__ = "result_submissions"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="positive_version"),
+        CheckConstraint("length(trim(award)) > 0", name="nonempty_award"),
+        CheckConstraint("proof_digest ~ '^[0-9a-f]{64}$'", name="proof_digest_format"),
+        UniqueConstraint("result_id", "version", name="uq_result_submissions_result_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    result_id: Mapped[UUID] = mapped_column(ForeignKey("competition_results.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    award: Mapped[str] = mapped_column(String(250))
+    proof_digest: Mapped[str] = mapped_column(String(64))
+    submitted_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResultRecipient(Base):
+    __tablename__ = "result_recipients"
+
+    submission_id: Mapped[UUID] = mapped_column(
+        ForeignKey("result_submissions.id"), primary_key=True,
+    )
+    recipient_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
+
+
 class Credential(Base):
     __tablename__ = "credentials"
     __table_args__ = (
