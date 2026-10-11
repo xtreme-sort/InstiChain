@@ -98,7 +98,6 @@ API endpoints (session cookie required):
 | GET | `/api/admin/clubs` | List clubs and advisor appointment history |
 | POST | `/api/admin/clubs` | Create a club and signed event |
 | POST | `/api/admin/clubs/{club_id}/advisors` | Register/bind the advisor key and append an appointment |
-| POST | `/api/admin/appointments/{appointment_id}/revocation` | End an appointment early with a signed `ROLE_REVOKED` event |
 
 Public verification endpoints (no session; intended for external verifiers):
 
@@ -121,26 +120,31 @@ This does not implement advisor credential signing or key recovery. The local
 two-organization network is a development topology; production organizations must
 operate their nodes independently.
 
-## Revoking an Appointment
+## Revocation and the Revocation List
 
-Select **Revoke** beside an active or scheduled advisor in **Institute
-administration** and supply a reason. The reason is recorded on Fabric, so give an
-institutional justification, not personal details.
+Club roles are revoked by the faculty advisor who holds authority over that club,
+not by the administrator: see the advisor-signed endpoints under
+`/api/advisor/clubs/{club_id}/roles/{appointment_id}/revocations`. The reason is
+recorded on Fabric, so give an institutional justification, not personal details.
 
 Revocation appends a signed `ROLE_REVOKED` event and only then sets the local
 `revoked_at`. As with appointment, a Fabric failure leaves no local change. The
 chaincode rejects a revocation whose appointment has no granting event or is
 already revoked, so a retry is safe. An appointment whose term has already elapsed
 cannot be revoked: it already denies authority, and recording a revocation would
-misreport history. Revoking frees the club's advisor slot, so a successor can be
-appointed for a new term.
-
-Because an appointment's ID is derived from its club, user and requested term, a
-successor appointment must use a new term. Re-submitting an identical term after a
-revocation reuses that ID and is rejected as a conflicting Fabric event.
+misreport history.
 
 Revocation is append-only: the original appointment and its grant event are
 retained, and credentials issued earlier remain valid unless revoked separately.
+
+Verifiers read current status from the public endpoints listed above. These need
+no account and carry `checked_at`, because a signature check alone cannot
+establish that no later revocation exists; an absent entry means "not revoked at
+that time", never a proof of validity.
+
+Because an advisor appointment's ID is derived from its club, user and requested
+term, a successor appointment must use a new term. Re-submitting an identical term
+after a revocation reuses that ID and is rejected as a conflicting Fabric event.
 
 ## 4. Check Email Delivery Early
 

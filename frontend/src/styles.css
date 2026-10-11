@@ -91,7 +91,6 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .club-list > li { padding: 20px 0; border-top: 1px solid #dce3df; }
 .club-slug { color: #67716c; margin: 4px 0; }
 .advisor-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; margin-top: 14px; }
-.advisor-row button { grid-column: 2; justify-self: end; display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 600px) {
   .admin-forms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .advisor-row { grid-template-columns: minmax(0, 1fr); }

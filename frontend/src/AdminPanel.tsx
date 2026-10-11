@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, UserCheck, UserX } from 'lucide-react'
+import { Plus, UserCheck } from 'lucide-react'
 
 type Advisor = { id: string; name: string; email: string; starts_at: string; ends_at: string; status: string }
 type Club = { id: string; name: string; slug: string; description: string | null; advisors: Advisor[] }
@@ -78,23 +78,6 @@ export default function AdminPanel() {
     }
   }
 
-  async function revoke(advisor: Advisor) {
-    const reason = window.prompt(`Reason for revoking ${advisor.name}'s appointment:`)?.trim()
-    if (!reason) return
-    setPending(true)
-    setError('')
-    setMessage('')
-    try {
-      await adminRequest(`appointments/${advisor.id}/revocation`, { reason })
-      setMessage('Appointment revoked.')
-      setClubs(await adminRequest('clubs'))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to revoke this appointment.')
-    } finally {
-      setPending(false)
-    }
-  }
-
   if (!allowed) return error ? <p role="alert" className="unavailable">{error}</p> : null
 
   return (
@@ -139,12 +122,6 @@ export default function AdminPanel() {
             <strong>{advisor.name}</strong><span>{advisor.status}</span>
             <span>{advisor.email}</span>
             <span>{new Date(advisor.starts_at).toLocaleDateString()} to {new Date(advisor.ends_at).toLocaleDateString()}</span>
-            {(advisor.status === 'active' || advisor.status === 'scheduled') && (
-              <button type="button" disabled={pending} onClick={() => void revoke(advisor)}
-                title="Revoke this appointment" aria-label={`Revoke ${advisor.name}'s appointment`}>
-                <UserX size={16} aria-hidden="true" />Revoke
-              </button>
-            )}
           </div>) : <p>No advisor appointed.</p>}
         </li>)}
       </ul>

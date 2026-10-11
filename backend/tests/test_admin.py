@@ -842,111 +842,60 @@ class AdminTests(unittest.TestCase):
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Club)), 0)
 
-    def appoint(self, club, **overrides):
-        response = self.client.post(f"/api/admin/clubs/{club}/advisors",
-                                    json=self.advisor_body(**overrides))
-        self.assertEqual(response.status_code, 201, response.text)
-        return response.json()["id"]
-
-    def test_revocation_records_signed_event_and_lists_the_appointment(self):
+    def test_revocation_list_reports_revoked_roles_for_verifiers(self):
+        """The list is the only way a verifier can establish current status."""
         self.bootstrap()
-        appointment = self.appoint(self.club())
-        listed = self.client.get("/api/ledger/revocations").json()
-        self.assertEqual((listed["total"], listed["revocations"]), (0, []))
-        status = self.client.get(f"/api/ledger/revocations/appointment/{appointment}").json()
-        self.assertFalse(status["revoked"])
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
 
-        response = self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                    json={"reason": "Advisor left the institute"})
-        self.assertEqual(response.status_code, 201, response.text)
-        self.assertEqual(response.json()["appointment_id"], appointment)
+        # An unrevoked role is absent from the list and reports revoked: false.
+        empty = self.client.get("/api/ledger/revocations").json()
+        self.assertEqual((empty["total"], empty["revocations"]), (0, []))
+        before = self.client.get(f"/api/ledger/revocations/appointment/{granted['id']}").json()
+        self.assertFalse(before["revoked"])
+        self.assertIsNone(before["revoked_at"])
+        self.assertIsNotNone(before["checked_at"])
 
-        with Session(self.engine) as db:
-            stored = db.get(Appointment, UUID(appointment))
-            self.assertIsNotNone(stored.revoked_at)
-            event = db.get(FabricTransaction, stored.revocation_transaction_id)
-            self.assertEqual(event.event_type, "ROLE_REVOKED")
-            self.assertEqual(event.object_ids["appointment_id"], appointment)
-            self.assertEqual(event.payload["reason"], "Advisor left the institute")
-            key = db.get(AuthorityKey, event.actor_key_id)
-            document = action_document(event.request_id, event.event_type, event.object_ids,
-                                       event.payload, event.actor_id, event.actor_key_id)
-            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
-                event.signature, rfc8785.dumps(document))
+        prepared = self.prepare_revocation(club, granted["id"])
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).status_code, 201)
 
         listed = self.client.get("/api/ledger/revocations").json()
         self.assertEqual(listed["total"], 1)
-        self.assertEqual(listed["revocations"][0]["subject_type"], "appointment")
-        self.assertEqual(listed["revocations"][0]["subject_id"], appointment)
-        self.assertTrue(self.client.get(f"/api/ledger/revocations/appointment/{appointment}").json()["revoked"])
-        self.assertEqual(self.client.get("/api/admin/clubs").json()[0]["advisors"][0]["status"], "revoked")
-
-    def test_revocation_rejects_repeat_unknown_and_elapsed_appointments(self):
-        self.bootstrap()
-        club = self.club()
-        appointment = self.appoint(club)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{uuid4()}/revocation",
-                                         json={"reason": "Unknown"}).status_code, 404)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": " "}).status_code, 422)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": "First"}).status_code, 201)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": "Second"}).status_code, 409)
+        entry = listed["revocations"][0]
+        self.assertEqual(entry["subject_type"], "appointment")
+        self.assertEqual(entry["subject_id"], granted["id"])
         with Session(self.engine) as db:
-            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)
-                                       .where(FabricTransaction.event_type == "ROLE_REVOKED")), 1)
-        elapsed = self.appoint(self.club("robotics"), ends_at=(self.now + timedelta(days=30)).isoformat())
-        with Session(self.engine) as db, db.begin():
-            # A term that has run its course; the row must keep starts_at < ends_at.
-            stored = db.get(Appointment, UUID(elapsed))
-            stored.starts_at = self.now - timedelta(days=2)
-            stored.ends_at = self.now - timedelta(days=1)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{elapsed}/revocation",
-                                         json={"reason": "Already over"}).status_code, 409)
+            appointment = db.get(Appointment, UUID(granted["id"]))
+            self.assertEqual(entry["revocation_transaction_id"],
+                             str(appointment.revocation_transaction_id))
 
-    def test_revocation_requires_admin_origin_and_live_fabric(self):
-        self.bootstrap()
-        appointment = self.appoint(self.club())
-        self.login("student")
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": "Not allowed"}).status_code, 403)
-        self.login("admin")
-        self.client.headers["Origin"] = "https://attacker.example"
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": "Cross origin"}).status_code, 403)
-        self.client.headers["Origin"] = "http://127.0.0.1:5173"
-        with patch("app.admin.append_admin_event", side_effect=FabricUnavailable("down")):
-            self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                             json={"reason": "Fabric down"}).status_code, 503)
-        with Session(self.engine) as db:
-            self.assertIsNone(db.get(Appointment, UUID(appointment)).revoked_at)
-        self.assertEqual(self.client.get("/api/ledger/revocations").json()["total"], 0)
+        status = self.client.get(f"/api/ledger/revocations/appointment/{granted['id']}").json()
+        self.assertTrue(status["revoked"])
+        self.assertEqual(status["revocation_transaction_id"], entry["revocation_transaction_id"])
 
-    def test_racing_revocations_append_one_event(self):
-        self.bootstrap()
-        appointment = self.appoint(self.club())
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda _: self.client.post(
-                f"/api/admin/appointments/{appointment}/revocation",
-                json={"reason": "Concurrent"}).status_code, range(2)))
-        self.assertEqual(sorted(results), [201, 409])
-        with Session(self.engine) as db:
-            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)
-                                       .where(FabricTransaction.event_type == "ROLE_REVOKED")), 1)
-        self.assertEqual(self.client.get("/api/ledger/revocations").json()["total"], 1)
+        # Filtering by the other subject type must not report this appointment.
+        credentials = self.client.get("/api/ledger/revocations?subject=credential").json()
+        self.assertEqual((credentials["total"], credentials["revocations"]), (0, []))
+        appointments = self.client.get("/api/ledger/revocations?subject=appointment").json()
+        self.assertEqual(appointments["total"], 1)
 
-    def test_revoked_advisor_term_frees_the_club_for_a_new_appointment(self):
+    def test_revocation_list_is_public_paged_and_uncached(self):
         self.bootstrap()
-        club = self.club()
-        appointment = self.appoint(club)
-        # A fresh term, as an annual handover would use: the appointment ID is
-        # derived from the club, user and term, so a repeated term collides.
-        successor = self.advisor_body(ends_at=(self.now + timedelta(days=700)).isoformat())
-        self.assertEqual(self.client.post(f"/api/admin/clubs/{club}/advisors", json=successor).status_code, 409)
-        self.assertEqual(self.client.post(f"/api/admin/appointments/{appointment}/revocation",
-                                         json={"reason": "Handover"}).status_code, 201)
-        self.assertEqual(self.client.post(f"/api/admin/clubs/{club}/advisors", json=successor).status_code, 201)
+        self.client.cookies.clear()
+        response = self.client.get("/api/ledger/revocations")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIsNotNone(response.json()["checked_at"])
+        paged = self.client.get("/api/ledger/revocations?limit=1&offset=0").json()
+        self.assertEqual((paged["limit"], paged["offset"]), (1, 0))
+        for path in ["/api/ledger/revocations?limit=0", "/api/ledger/revocations?subject=nonsense",
+                     f"/api/ledger/revocations/nonsense/{uuid4()}"]:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 422)
+        unknown = self.client.get(f"/api/ledger/revocations/credential/{uuid4()}").json()
+        self.assertFalse(unknown["revoked"])
 
     def test_revoked_admin_is_denied(self):
         self.bootstrap()

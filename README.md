@@ -268,11 +268,11 @@ limits; expired older rows can be removed by a future retention job.
 
 ## Administrator Setup
 
-Administrator bootstrap, club creation, advisor onboarding and appointment
-revocation are available after migration `0004`. Follow
+Administrator bootstrap, club creation and advisor onboarding are available after
+migration `0004`. Follow
 [administrator and integration setup](backend/ADMIN_SETUP.md)
 for the controlled bootstrap command, signing-key preparation, institutional
-verification, revocation, SMTP delivery checks and read-only Google Drive access probe.
+verification, SMTP delivery checks and read-only Google Drive access probe.
 
 ## Verification and the Revocation List
 
@@ -292,12 +292,12 @@ time", which is not a proof of validity: a signature check alone cannot establis
 that no later revocation exists, so a verifier that cannot reach these endpoints
 must report status unknown rather than valid.
 
-Administrators revoke an advisor appointment with
-`POST /api/admin/appointments/{appointment_id}/revocation` and a `reason`, or the
-**Revoke** control in the administration panel. The reason is stored on Fabric, so
-record an institutional justification rather than personal details. Credential
-revocation events are already validated and indexed by the chaincode but have no
-write endpoint until credential issuance exists.
+Revocations are written by the faculty advisor who holds authority over the club,
+through the advisor-signed endpoints under `/api/advisor/clubs/{club_id}/roles/`.
+The reason is stored on Fabric, so record an institutional justification rather
+than personal details. Credential revocation events are already validated and
+indexed by the chaincode but have no write endpoint until credential revocation
+is built on top of issuance.
 
 No account is promoted by signup. Private keys stay outside Git. Real SMTP inbox
 delivery and Drive test-account access require your own provider configuration.

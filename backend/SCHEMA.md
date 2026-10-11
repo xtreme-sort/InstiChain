@@ -61,9 +61,9 @@ share permissions remain future modules.
 Appointments and credentials are current-state projection tables. Their mutable
 revocation/replacement fields are maintained from immutable ledger events:
 appointment revocation sets `revoked_at` and `revocation_transaction_id` together,
-only after Fabric confirms a `ROLE_REVOKED` event. Credential revocation uses the
-same column pair and is already validated by the chaincode, but has no write
-endpoint until credential issuance exists.
+only after Fabric confirms a `ROLE_REVOKED` event, which the club's faculty
+advisor signs. Credential revocation uses the same column pair and is already
+validated and indexed by the chaincode, but has no write endpoint yet.
 Ending an appointment does not delete credentials or automatically revoke them.
 `authority_keys` and `administrator` carry `revoked_at` without a transaction
 reference, so key revocation cannot yet be bound to a Fabric receipt; that needs

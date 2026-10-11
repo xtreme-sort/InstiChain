@@ -22,9 +22,10 @@ identities and converts browser requests into endorsed Fabric transactions.
 
 | Data | Authoritative system | Reason |
 | --- | --- | --- |
-| Administrator bootstrap, club creation, advisor appointment and role revocation events | Hyperledger Fabric | Immutable, ordered and endorsed by institute and auditor peers |
-| Future competition, result and credential events | Hyperledger Fabric | Institutional records must be independently verifiable |
+| Administrator bootstrap, club creation, advisor appointment, role grant and role revocation events | Hyperledger Fabric | Immutable, ordered and endorsed by institute and auditor peers |
+| Credential issuance events, and future credential revocation | Hyperledger Fabric | Institutional records must be independently verifiable |
 | Revocation list read model | PostgreSQL projection, indexed on Fabric | Verifiers need one fast status answer; Fabric remains authoritative |
+| Competitions, result submissions and recipients | PostgreSQL | Drafts and versions are private until an advisor approves and issues |
 | Users, email verification tokens and login sessions | PostgreSQL | Private, expiring and operational data must not be permanently replicated |
 | Club and appointment read models | PostgreSQL projection | Efficient UI queries; each write is accepted only after Fabric confirms it |
 | Fabric transaction receipts | PostgreSQL projection | Connects local records to transaction IDs and block numbers |
@@ -66,7 +67,12 @@ backend/
   app/verification.py         Institute email validation and single-use links
   app/session.py              Login sessions, cookies and logout
   app/email_delivery.py       SMTP delivery
-  app/admin.py                Protected club/advisor/revocation HTTP endpoints
+  app/admin.py                Protected club/advisor HTTP endpoints
+  app/advisor.py              Advisor-signed club role grants and revocation
+  app/permissions.py          Club-scoped role and authority checks
+  app/competitions.py         Club-scoped competition workflow
+  app/results.py              Immutable versioned result submissions
+  app/issuance.py             Advisor-signed team credential issuance
   app/authority.py            Event signing, Fabric submission and receipts
   app/ledger.py               Read-only Fabric audit API and revocation list
   app/models.py               Auth/private tables and local projections
@@ -104,21 +110,21 @@ must be opened through its desktop application.
 - Server-side sessions with revocation and secure-cookie behavior.
 - Controlled initial administrator bootstrap.
 - Club creation and faculty-advisor appointment.
-- Fabric events for `ADMIN_BOOTSTRAPPED`, `CLUB_CREATED`, `ADVISOR_APPOINTED`
-  and `ROLE_REVOKED`.
+- Club-scoped advisor access, advisor-signed club role grants and revocation.
+- Club-scoped competitions, immutable versioned result submissions and
+  advisor-signed team credential issuance.
+- Fabric events for `ADMIN_BOOTSTRAPPED`, `CLUB_CREATED`, `ADVISOR_APPOINTED`,
+  `ROLE_GRANTED`, `ROLE_REVOKED` and `ACHIEVEMENT_ISSUED`.
 - Two-organization Fabric endorsement policy requiring Org1 and Org2.
 - Direct audit endpoints at `/api/ledger/health`, `/api/ledger/events` and
   `/api/ledger/events/{request_id}`.
-- Administrator-signed appointment revocation and the public revocation list at
-  `/api/ledger/revocations`, `/api/ledger/revocations/{type}/{id}` and
-  `/api/ledger/fabric-revocations`.
+- The public revocation list at `/api/ledger/revocations`,
+  `/api/ledger/revocations/{type}/{id}` and `/api/ledger/fabric-revocations`.
 
-Competition creation, result submission and credential issuance are represented
-in the planned projection schema but do not yet have workflows or Fabric event
-handlers. They must follow the same commit-first flow above. Credential
-revocation (`ACHIEVEMENT_REVOKED`) is validated and indexed by the chaincode and
-listed by the revocation endpoints, but has no write endpoint until issuance
-exists.
+Credential revocation (`ACHIEVEMENT_REVOKED`) is validated and indexed by the
+chaincode and listed by the revocation endpoints, but has no write endpoint yet.
+Share links, QR verification pages and the student vault remain future modules,
+and must follow the same commit-first flow above.
 
 ## Revocation and the revocation list
 
@@ -128,6 +134,11 @@ set only after Fabric confirms. The chaincode refuses a revocation whose subject
 has no granting event or is already revoked, and maintains a `revocation:`
 subject index so a verifier's "is this revoked?" question is a direct lookup
 rather than a replay of the whole ledger.
+
+The write side belongs to the club's faculty advisor and is signed in the
+browser with their own key (`app/advisor.py`), matching the design document's
+role matrix. The read side below is separate, public and authority-free: it
+reports what the ledger already says, so it needs no signing key.
 
 The read endpoints are deliberately unauthenticated: an external placement
 verifier holds a student's share link, not an institute account. They return
