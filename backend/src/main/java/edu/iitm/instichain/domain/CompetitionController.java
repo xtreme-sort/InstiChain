@@ -1,5 +1,6 @@
 package edu.iitm.instichain.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.iitm.instichain.common.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -35,8 +36,8 @@ public class CompetitionController {
 
     record CompetitionRequest(@NotBlank @Size(max = 250) String title,
                               @Size(max = 5000) String description,
-                              @NotNull OffsetDateTime startsAt,
-                              OffsetDateTime endsAt) {}
+                              @JsonProperty("starts_at") @NotNull OffsetDateTime startsAt,
+                              @JsonProperty("ends_at") OffsetDateTime endsAt) {}
     record CompetitionResponse(UUID id, UUID clubId, String title, String description,
                                OffsetDateTime startsAt, OffsetDateTime endsAt,
                                UUID createdById, String createdByName, OffsetDateTime createdAt) {}

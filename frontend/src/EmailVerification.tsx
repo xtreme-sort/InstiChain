@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { CheckCircle2, LogOut, Mail, ShieldCheck } from 'lucide-react'
+import SigningIdentity from './SigningIdentity'
+import { generateSigningIdentity, saveSigningIdentity } from './signingIdentity'
 
 export type Account = { id: string; email: string; display_name: string }
+type ConfirmResult = { message: string; account: Account }
 
 async function submitVerification<T = { message: string }>(path: string, body: object): Promise<T> {
   const response = await fetch(`/api/auth/email/${path}`, {
@@ -98,13 +101,17 @@ export default function EmailVerification({ account, onSignedIn, onSignedOut, on
     setError('')
     setMessage('')
     try {
-      const result = await submitVerification(token ? 'confirm' : 'request', token
-        ? linkState === 'register' ? { token, display_name: displayName } : { token }
+      const newIdentity = token && linkState === 'register' ? await generateSigningIdentity() : null
+      const result = await submitVerification<ConfirmResult>(token ? 'confirm' : 'request', token
+        ? linkState === 'register'
+          ? { token, display_name: displayName, public_key: newIdentity?.publicKey }
+          : { token }
         : { email: email.trim() })
       if (token) {
-        const signedIn = await fetchSession()
+        const signedIn = result.account || await fetchSession()
         setToken('')
         if (signedIn) {
+          if (newIdentity) await saveSigningIdentity(signedIn.id, newIdentity)
           onSignedIn(signedIn)
         } else {
           setMessage(result.message)
@@ -138,6 +145,7 @@ export default function EmailVerification({ account, onSignedIn, onSignedOut, on
       <CheckCircle2 size={32} className="connected" aria-hidden="true" />
       <h1 id="account-title">Signed in</h1>
       <p role="status">Signed in as {account.display_name} ({account.email}).</p>
+      <SigningIdentity userId={account.id} />
       <button className="account-logout" type="button" onClick={() => void logout()} disabled={pending}>
         <LogOut size={18} aria-hidden="true" />
         Log out

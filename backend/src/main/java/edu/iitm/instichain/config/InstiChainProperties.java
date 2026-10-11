@@ -14,6 +14,7 @@ public record InstiChainProperties(
         @NotBlank String appName,
         @NotBlank String publicAppUrl,
         @Min(1) @Max(60) int verificationTtlMinutes,
+        @Min(1) @Max(100) int verificationDailyLimit,
         @Min(1) @Max(365) int sessionTtlDays,
         @Valid Smtp smtp,
         @Valid Fabric fabric,

@@ -32,6 +32,7 @@ compileJava {
 }
 
 application {
+    applicationName = 'instichain'
     mainClass = 'org.hyperledger.fabric.contract.ContractRouter'
 }
 

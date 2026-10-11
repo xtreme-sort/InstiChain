@@ -19,6 +19,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.annotation.Profile;
 
 public final class OperatorCli {
     private OperatorCli() {}
@@ -94,15 +95,17 @@ public final class OperatorCli {
 
     private static ConfigurableApplicationContext preflightContext() {
         return new SpringApplicationBuilder(PreflightConfiguration.class)
+                .profiles("operator-preflight")
                 .web(WebApplicationType.NONE).run();
     }
 
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties(InstiChainProperties.class)
+    @Profile("operator-preflight")
     static class PreflightConfiguration {
         @Bean
         ObjectMapper objectMapper() {
-            return new ObjectMapper();
+            return new ObjectMapper().findAndRegisterModules();
         }
 
         @Bean

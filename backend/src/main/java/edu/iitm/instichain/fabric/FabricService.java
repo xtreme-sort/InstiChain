@@ -29,10 +29,13 @@ import org.hyperledger.fabric.client.identity.Identity;
 import org.hyperledger.fabric.client.identity.Signer;
 import org.hyperledger.fabric.client.identity.Signers;
 import org.hyperledger.fabric.client.identity.X509Identity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class FabricService {
+    private static final Logger LOG = LoggerFactory.getLogger(FabricService.class);
     private final InstiChainProperties properties;
     private final CanonicalJson json;
     private ManagedChannel channel;
@@ -60,6 +63,7 @@ public class FabricService {
         } catch (FabricUnavailableException error) {
             throw error;
         } catch (Exception error) {
+            LOG.warn("Fabric submission failed", error);
             throw new FabricUnavailableException("Fabric did not confirm the transaction", error);
         }
     }
@@ -68,6 +72,7 @@ public class FabricService {
         try {
             return json.parse(contract().evaluateTransaction(transaction, arguments));
         } catch (Exception error) {
+            LOG.warn("Fabric evaluation {} failed", transaction, error);
             throw new FabricUnavailableException("The Fabric ledger is unavailable", error);
         }
     }

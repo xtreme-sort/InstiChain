@@ -34,22 +34,21 @@ The command appends `ADMIN_BOOTSTRAPPED` to Fabric before creating the database
 projection. It is idempotent for the same active account and key and refuses to
 replace the administrator. There is no HTTP promotion endpoint.
 
-## Prepare an advisor key
+## Prepare an advisor signing identity
 
-An advisor should generate an encrypted Ed25519 key on their own workstation:
+The advisor signs in to InstiChain once using the browser and device they will
+use for advisor actions. The browser generates an Ed25519 key pair automatically:
 
-```bash
-mkdir -p .keys
-openssl genpkey -algorithm Ed25519 -aes-256-cbc -out .keys/advisor.pem
-chmod 600 .keys/advisor.pem
-openssl pkey -in .keys/advisor.pem -pubout -outform DER \
-  | tail -c 32 | base64 -w0
-```
+- The non-exportable private key remains in that browser's IndexedDB storage.
+- Only the public key is registered with the Java backend.
+- The account page displays the public key, fingerprint, and local private-key
+  availability.
 
-Only the printed public key is given to the administrator. The private key and
-passphrase remain with the advisor. The administrator verifies the faculty
-identity and key binding through an institutional channel, then uses the UI to
-create the club and appointment.
+The administrator verifies the faculty identity through an institutional
+channel, then uses the UI to create the club and appointment. The appointment
+automatically uses the public key registered to the advisor's verified account.
+If the private key is reported as unavailable, key recovery or rotation is
+required before that device can sign advisor actions.
 
 ## Local email check
 

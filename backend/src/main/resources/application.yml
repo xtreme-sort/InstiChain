@@ -28,6 +28,7 @@ instichain:
   app-name: ${INSTICHAIN_APP_NAME:InstiChain API}
   public-app-url: ${INSTICHAIN_PUBLIC_APP_URL:http://127.0.0.1:5173}
   verification-ttl-minutes: ${INSTICHAIN_VERIFICATION_TTL_MINUTES:15}
+  verification-daily-limit: ${INSTICHAIN_VERIFICATION_DAILY_LIMIT:20}
   session-ttl-days: ${INSTICHAIN_SESSION_TTL_DAYS:30}
   admin-signing-key-file: ${INSTICHAIN_ADMIN_SIGNING_KEY_FILE:}
   drive-test-access-token: ${INSTICHAIN_DRIVE_TEST_ACCESS_TOKEN:}

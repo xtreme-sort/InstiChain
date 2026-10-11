@@ -5,21 +5,29 @@ import { Plus, UserCheck } from 'lucide-react'
 type Advisor = { id: string; name: string; email: string; starts_at: string; ends_at: string; status: string }
 type Club = { id: string; name: string; slug: string; description: string | null; advisors: Advisor[] }
 
-async function adminRequest(path: string, body?: object) {
+async function adminRequest<T>(path: string, body?: object): Promise<T> {
   const response = await fetch(`/api/admin/${path}`, {
     method: body ? 'POST' : 'GET',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(body ? 60000 : 15000),
   })
-  const data = await response.json().catch(() => null)
+  const responseBody = await response.text()
+  let data: Record<string, unknown> | null = null
+  try {
+    data = responseBody ? JSON.parse(responseBody) as Record<string, unknown> : null
+  } catch {
+    // A proxy or framework error page is handled by the status fallback below.
+  }
   if (!response.ok) {
     const detail = data?.detail
+    const message = data?.message
     throw new Error(typeof detail === 'string' ? detail : Array.isArray(detail)
-      ? detail.map((item: { msg: string }) => item.msg).join('. ')
-      : 'Unable to complete this request.')
+      ? detail.map((item: { msg?: string }) => item.msg || 'Invalid value').join('. ')
+      : typeof message === 'string' && message ? message
+      : `The server rejected this request (HTTP ${response.status}). Check the backend terminal for details.`)
   }
-  return data
+  return data as T
 }
 
 export default function AdminPanel() {
@@ -37,7 +45,7 @@ export default function AdminPanel() {
         const response = await fetch('/api/admin/access', { signal: AbortSignal.timeout(5000) })
         if (response.status === 403 || response.status === 401) return
         if (!response.ok) throw new Error('Unable to check administrator access.')
-        const rows: Club[] = await adminRequest('clubs')
+        const rows = await adminRequest<Club[]>('clubs')
         if (active) {
           setAllowed(true)
           setClubs(rows)
@@ -60,17 +68,17 @@ export default function AdminPanel() {
     setMessage('')
     try {
       if (kind === 'club') {
-        const club = await adminRequest('clubs', { name: value('name'), slug: value('slug'), description: value('description') || null })
+        const club = await adminRequest<{ id: string }>('clubs', { name: value('name'), slug: value('slug'), description: value('description') || null })
         setClubId(club.id)
       } else {
-        await adminRequest(`clubs/${clubId}/advisors`, {
-          email: value('email'), public_key: value('public_key'), verification_reference: value('verification_reference'),
+        await adminRequest<Record<string, unknown>>(`clubs/${clubId}/advisors`, {
+          email: value('email'), verification_reference: value('verification_reference'),
           starts_at: new Date(value('starts_at')).toISOString(), ends_at: new Date(value('ends_at')).toISOString(),
         })
       }
       setMessage(kind === 'club' ? 'Club created.' : 'Advisor appointed.')
       form.reset()
-      setClubs(await adminRequest('clubs'))
+      setClubs(await adminRequest<Club[]>('clubs'))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to save changes.')
     } finally {
@@ -103,7 +111,6 @@ export default function AdminPanel() {
               {clubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
             </select></label>
             <label>Verified institute email<input name="email" type="email" required maxLength={254} /></label>
-            <label>Ed25519 public key (base64)<input name="public_key" required minLength={44} maxLength={44} autoComplete="off" /></label>
             <label>Institutional verification reference<input name="verification_reference" required maxLength={500} /></label>
             <label>Term starts (local time)<input name="starts_at" type="datetime-local" required /></label>
             <label>Term ends (local time)<input name="ends_at" type="datetime-local" required /></label>

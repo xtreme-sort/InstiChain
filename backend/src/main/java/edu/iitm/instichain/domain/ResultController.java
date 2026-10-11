@@ -1,5 +1,6 @@
 package edu.iitm.instichain.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.iitm.instichain.auth.InstituteEmail;
 import edu.iitm.instichain.auth.UserAccount;
 import edu.iitm.instichain.common.ApiException;
@@ -40,7 +41,9 @@ public class ResultController {
     }
 
     record SubmissionRequest(@NotBlank @Size(max = 250) String award,
+                             @JsonProperty("proof_digest")
                              @Pattern(regexp = "^[0-9a-f]{64}$") String proofDigest,
+                             @JsonProperty("recipient_emails")
                              @NotEmpty @Size(max = 100) List<@NotBlank String> recipientEmails) {}
     record Recipient(UUID id, String email, String displayName) {}
     record Submission(UUID id, UUID resultId, UUID competitionId, int version, String award,

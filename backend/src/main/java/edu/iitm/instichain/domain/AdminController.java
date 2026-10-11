@@ -1,5 +1,6 @@
 package edu.iitm.instichain.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.iitm.instichain.auth.InstituteEmail;
 import edu.iitm.instichain.common.ApiException;
 import edu.iitm.instichain.common.UuidV5;
@@ -46,10 +47,10 @@ public class AdminController {
                        @NotBlank @Size(max = 200) String name,
                        @Size(max = 2000) String description) {}
     record AdvisorRequest(@NotBlank @Size(max = 254) String email,
-                          @NotBlank @Size(max = 44) String publicKey,
+                          @JsonProperty("verification_reference")
                           @NotBlank @Size(max = 500) String verificationReference,
-                          @NotNull OffsetDateTime startsAt,
-                          @NotNull OffsetDateTime endsAt) {}
+                          @JsonProperty("starts_at") @NotNull OffsetDateTime startsAt,
+                          @JsonProperty("ends_at") @NotNull OffsetDateTime endsAt) {}
 
     @GetMapping("/access")
     Map<String, Boolean> access(HttpServletRequest request) {
@@ -152,13 +153,21 @@ public class AdminController {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, error.getMessage());
         }
         List<Map<String, Object>> users = jdbc.queryForList("""
-                SELECT id, email_verified_at FROM users WHERE email = ?
+                SELECT u.id, u.email_verified_at, k.public_key
+                FROM users u LEFT JOIN user_signing_keys k
+                  ON k.user_id = u.id AND k.revoked_at IS NULL
+                WHERE u.email = ?
                 """, email);
         if (users.isEmpty() || users.getFirst().get("email_verified_at") == null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "The advisor must first verify their institute account.");
         }
         UUID userId = (UUID) users.getFirst().get("id");
+        byte[] rawKey = (byte[]) users.getFirst().get("public_key");
+        if (rawKey == null) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "The advisor must sign in once to create their browser signing key.");
+        }
         OffsetDateTime start = body.startsAt().isBefore(now) ? now : body.startsAt();
         Boolean overlap = jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM appointments
@@ -168,17 +177,6 @@ public class AdminController {
         if (Boolean.TRUE.equals(overlap)) {
             throw new ApiException(HttpStatus.CONFLICT,
                     "This club already has an advisor during the requested term.");
-        }
-        byte[] rawKey;
-        try {
-            rawKey = Base64.getDecoder().decode(body.publicKey());
-        } catch (IllegalArgumentException error) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Provide a base64 Ed25519 public key");
-        }
-        if (rawKey.length != 32 || java.util.Arrays.equals(rawKey, new byte[32])) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Provide a 32-byte Ed25519 public key");
         }
         UUID keyId = UuidV5.url("instichain:advisor-key:" + Base64.getEncoder().encodeToString(rawKey));
         List<Map<String, Object>> keys = jdbc.queryForList("""

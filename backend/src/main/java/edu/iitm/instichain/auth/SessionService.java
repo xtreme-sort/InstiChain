@@ -5,6 +5,7 @@ import edu.iitm.instichain.common.Hashing;
 import edu.iitm.instichain.config.InstiChainProperties;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
+import java.net.URI;
 import java.security.SecureRandom;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -76,6 +77,14 @@ public class SessionService {
 
     public boolean secureCookie() {
         return properties.publicAppUrl().startsWith("https://");
+    }
+
+    public void requireSameOrigin(HttpServletRequest request) {
+        URI app = URI.create(properties.publicAppUrl());
+        String expected = app.getScheme() + "://" + app.getAuthority();
+        if (!expected.equals(request.getHeader("Origin"))) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "A same-origin request is required.");
+        }
     }
 
     public static UserAccount mapUser(ResultSet result, int row) throws SQLException {

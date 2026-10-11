@@ -91,6 +91,12 @@ there is no extra gateway process to start.
    name field, and the stored identity and name remain unchanged.
 4. The link expires after 15 minutes and can be used only once.
 
+At first registration, the browser also generates an Ed25519 signing identity.
+The non-exportable private key stays in IndexedDB on that device; only the public
+key is registered with the backend. Existing accounts receive a key on their
+next login. The account view shows the public key, SHA-256 fingerprint, and
+whether the matching private key is available on the current device.
+
 Only SHA-256 hashes of verification and session tokens are stored. Sessions use
 an HTTP-only cookie and persist across browser reloads until logout or expiry.
 Email ownership creates a basic user only; it grants no administrator or advisor

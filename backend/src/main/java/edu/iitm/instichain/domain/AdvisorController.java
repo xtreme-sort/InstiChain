@@ -1,5 +1,6 @@
 package edu.iitm.instichain.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import edu.iitm.instichain.auth.InstituteEmail;
 import edu.iitm.instichain.auth.UserAccount;
@@ -51,7 +52,8 @@ public class AdvisorController {
 
     record RoleDraft(@NotBlank @Size(max = 254) String email,
                      @Pattern(regexp = "club_head|office_bearer") String position,
-                     @NotNull OffsetDateTime startsAt, @NotNull OffsetDateTime endsAt) {}
+                     @JsonProperty("starts_at") @NotNull OffsetDateTime startsAt,
+                     @JsonProperty("ends_at") @NotNull OffsetDateTime endsAt) {}
     record RevocationDraft(@NotBlank @Size(max = 500) String reason) {}
     record SignedDocument(@NotNull JsonNode document,
                           @NotBlank @Size(max = 88) String signature) {}

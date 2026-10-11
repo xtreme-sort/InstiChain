@@ -17,6 +17,12 @@ require_docker() {
     }
 }
 
+network_running() {
+    [[ "$(docker inspect --format '{{.State.Running}}' peer0.org1.example.com 2>/dev/null || true)" == true &&
+       "$(docker inspect --format '{{.State.Running}}' peer0.org2.example.com 2>/dev/null || true)" == true &&
+       "$(docker inspect --format '{{.State.Running}}' orderer.example.com 2>/dev/null || true)" == true ]]
+}
+
 case "$ACTION" in
     install)
         require_docker
@@ -33,9 +39,7 @@ case "$ACTION" in
         require_docker
         [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
         [[ -x "$ROOT/fabric/chaincode/gradlew" ]] || { echo "The Java chaincode Gradle wrapper is missing." >&2; exit 1; }
-        if [[ "$(docker inspect --format '{{.State.Running}}' peer0.org1.example.com 2>/dev/null || true)" == true &&
-              "$(docker inspect --format '{{.State.Running}}' peer0.org2.example.com 2>/dev/null || true)" == true &&
-              "$(docker inspect --format '{{.State.Running}}' orderer.example.com 2>/dev/null || true)" == true ]]; then
+        if network_running; then
             echo "Fabric network is already running; the existing ledger was preserved."
             echo "If it still runs JavaScript chaincode, run 'make fabric-upgrade' once."
             exit 0
@@ -48,6 +52,7 @@ case "$ACTION" in
             exit 0
         fi
         ./network.sh up createChannel -ca -c instichain
+        rm -f "$NETWORK/instichain.tar.gz"
         ./network.sh deployCC -c instichain -ccn instichain \
             -ccp "$ROOT/fabric/chaincode" -ccl java \
             -ccep "AND('Org1MSP.peer','Org2MSP.peer')"
@@ -58,6 +63,16 @@ case "$ACTION" in
         [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
         [[ -x "$ROOT/fabric/chaincode/gradlew" ]] || { echo "The Java chaincode Gradle wrapper is missing." >&2; exit 1; }
         cd "$NETWORK"
+        if ! network_running; then
+            if [[ ! -f "$NETWORK/channel-artifacts/instichain.block" ]]; then
+                echo "No existing instichain network was found. Run 'make fabric-up' for a fresh deployment." >&2
+                exit 1
+            fi
+            echo "Resuming the existing Fabric network before upgrading chaincode..."
+            ./network.sh up -ca
+        fi
+        network_running || { echo "Fabric peers did not start; run 'make status' and inspect Docker." >&2; exit 1; }
+        rm -f "$NETWORK/instichain.tar.gz"
         ./network.sh deployCC -c instichain -ccn instichain \
             -ccp "$ROOT/fabric/chaincode" -ccl java -ccv 2.0 -ccs 2 \
             -ccep "AND('Org1MSP.peer','Org2MSP.peer')"

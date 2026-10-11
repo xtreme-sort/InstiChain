@@ -26,12 +26,12 @@ class SchemaMigrationTest {
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-        assertEquals(1, flyway.migrate().migrationsExecuted);
+        assertEquals(2, flyway.migrate().migrationsExecuted);
 
         Set<String> expected = Set.of("users", "email_verifications", "sessions", "administrator",
                 "authority_keys", "clubs", "appointments", "competitions", "competition_results",
                 "result_submissions", "result_recipients", "credentials", "fabric_transactions",
-                "ledger_entries", "flyway_schema_history");
+                "ledger_entries", "user_signing_keys", "flyway_schema_history");
         Set<String> actual = new TreeSet<>();
         try (var connection = DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());

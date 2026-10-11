@@ -1,5 +1,6 @@
 package edu.iitm.instichain.auth;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import edu.iitm.instichain.common.ApiException;
 import edu.iitm.instichain.common.Hashing;
 import edu.iitm.instichain.config.InstiChainProperties;
@@ -39,21 +40,24 @@ public class EmailAuthController {
     private final JdbcTemplate jdbc;
     private final SessionService sessions;
     private final MailService mail;
+    private final SigningKeyService signingKeys;
     private final InstiChainProperties properties;
     private final SecureRandom random = new SecureRandom();
 
     public EmailAuthController(JdbcTemplate jdbc, SessionService sessions, MailService mail,
-                               InstiChainProperties properties) {
+                               SigningKeyService signingKeys, InstiChainProperties properties) {
         this.jdbc = jdbc;
         this.sessions = sessions;
         this.mail = mail;
+        this.signingKeys = signingKeys;
         this.properties = properties;
     }
 
     record EmailRequest(@NotBlank @Size(max = 254) String email) {}
     record TokenRequest(@NotBlank @Pattern(regexp = "^[A-Za-z0-9_-]{43}$") String token) {}
     record ConfirmRequest(@NotBlank @Pattern(regexp = "^[A-Za-z0-9_-]{43}$") String token,
-                          @Size(max = 200) String displayName) {}
+                          @JsonProperty("display_name") @Size(max = 200) String displayName,
+                          @JsonProperty("public_key") @Size(max = 44) String publicKey) {}
 
     @PostMapping("/request")
     @Transactional
@@ -71,7 +75,8 @@ public class EmailAuthController {
                 WHERE email = ? AND created_at > clock_timestamp() - interval '1 day'
                 ORDER BY created_at DESC
                 """, OffsetDateTime.class, email);
-        if (recent.size() >= 5 || (!recent.isEmpty() && recent.getFirst().isAfter(now.minusMinutes(1)))) {
+        if (recent.size() >= properties.verificationDailyLimit()
+                || (!recent.isEmpty() && recent.getFirst().isAfter(now.minusMinutes(1)))) {
             return accepted();
         }
         Boolean verified = jdbc.queryForObject("""
@@ -108,7 +113,7 @@ public class EmailAuthController {
 
     @PostMapping("/confirm")
     @Transactional
-    ResponseEntity<Map<String, String>> confirm(@Valid @RequestBody ConfirmRequest body,
+    ResponseEntity<Map<String, Object>> confirm(@Valid @RequestBody ConfirmRequest body,
                                                  HttpServletResponse servletResponse) {
         String digest = Hashing.sha256(body.token());
         String email;
@@ -129,6 +134,10 @@ public class EmailAuthController {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "Your full name is required to finish registration.");
         }
+        if (requiresName && (body.publicKey() == null || body.publicKey().isBlank())) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "A browser-generated signing key is required to finish registration.");
+        }
         OffsetDateTime now = now();
         UUID userId;
         if (existing.isEmpty()) {
@@ -144,6 +153,7 @@ public class EmailAuthController {
                         name, now, userId);
             }
         }
+        if (requiresName) signingKeys.register(userId, body.publicKey());
         jdbc.update("UPDATE email_verifications SET consumed_at = ? WHERE id = ?", now, verification.id());
         jdbc.update("""
                 UPDATE email_verifications SET invalidated_at = ?
@@ -155,8 +165,14 @@ public class EmailAuthController {
                 .maxAge(Duration.ofDays(properties.sessionTtlDays())).build();
         servletResponse.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .body(Map.of("message", requiresName
-                        ? "Your institute email is verified." : "You are signed in."));
+                .body(Map.of(
+                        "message", requiresName
+                                ? "Your institute email is verified." : "You are signed in.",
+                        "account", Map.of(
+                                "id", userId,
+                                "email", email,
+                                "display_name", requiresName
+                                        ? name : existing.getFirst().displayName())));
     }
 
     private Verification findValid(String token, boolean lock) {

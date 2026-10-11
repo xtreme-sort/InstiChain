@@ -74,6 +74,14 @@ button:hover { background: #edf2ef; }
 button:focus-visible { outline: 2px solid #166c52; outline-offset: 3px; }
 button:disabled { opacity: 0.5; cursor: wait; }
 .account-logout { width: auto; display: flex; gap: 8px; padding: 0 12px; }
+.signing-identity { margin: 28px 0; padding: 20px 0; border-block: 1px solid #dce3df; }
+.signing-identity h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; }
+.signing-identity dl { margin: 0; display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
+.signing-identity dt { color: #67716c; font-size: 13px; font-weight: 600; }
+.signing-identity dd { margin: 0; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.identity-public-key { display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 8px; }
+.identity-public-key code, .signing-identity dd code { word-break: break-all; }
+.identity-error { display: grid; grid-template-columns: minmax(0, 1fr) 36px; align-items: center; gap: 12px; }
 .administration { margin-top: 40px; border-top: 1px solid #dce3df; }
 .admin-forms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
 .administration h3 { font-size: 17px; margin: 20px 0; }
