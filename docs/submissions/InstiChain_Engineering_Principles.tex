@@ -1,0 +1,209 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=0.62in,top=0.55in,bottom=0.58in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\hypersetup{
+  pdftitle={Applying Engineering Principles in InstiChain},
+  pdfauthor={InstiChain Project Team},
+  pdfsubject={Prompt engineering, debugging, Git, testing, refactoring, and documentation}
+}
+
+\definecolor{ink}{HTML}{17212B}
+\definecolor{navy}{HTML}{173F5F}
+\definecolor{teal}{HTML}{147D72}
+\definecolor{soft}{HTML}{EDF3F5}
+\definecolor{rule}{HTML}{B8C8CF}
+\color{ink}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\textbf{InstiChain} \textcolor{rule}{|} Engineering Practices}
+\rhead{\small Project lifecycle report}
+\cfoot{\small\thepage\ / 3}
+\renewcommand{\headrulewidth}{0.35pt}
+
+\titleformat{\section}{\large\bfseries\color{navy}}{}{0pt}{}[\vspace{-3pt}\color{rule}\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{teal}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{2pt}
+\setlist[itemize]{leftmargin=15pt,itemsep=1.5pt,topsep=2pt,parsep=0pt}
+\setlist[enumerate]{leftmargin=18pt,itemsep=1.5pt,topsep=2pt,parsep=0pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3.5pt}
+\setlength{\emergencystretch}{2em}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.12}
+
+\newcommand{\callout}[1]{%
+  \vspace{2pt}\noindent
+  \colorbox{soft}{\parbox{0.965\linewidth}{\small #1}}\vspace{2pt}}
+
+\begin{document}
+
+{\fontsize{22}{24}\selectfont\bfseries\color{navy} Applying Engineering Principles in InstiChain}\par
+\vspace{2pt}
+{\large Faculty-authorized campus records on Hyperledger Fabric}\hfill{\small 11 October 2026}
+
+\section{Project Lifecycle and Engineering Strategy}
+
+The project is developed in small, reviewable stages:
+
+\begin{itemize}
+  \item \textbf{Foundation:} React frontend, FastAPI backend, configuration templates, and PostgreSQL migrations.
+  \item \textbf{Identity:} institute-email verification, single-use links, persistent sessions, and controlled administrator bootstrap.
+  \item \textbf{Institution setup:} club creation, advisor onboarding, and club-scoped authorization.
+  \item \textbf{Blockchain transition:} Hyperledger Fabric replaced the local hash chain as the authoritative institutional ledger.
+  \item \textbf{Domain workflows:} signed PoR grants/revocations, competitions, immutable results, and advisor-signed achievements.
+\end{itemize}
+
+The architecture has clear ownership rules:
+
+\begin{itemize}
+  \item \textbf{Fabric:} authoritative institutional events and their ordered audit history.
+  \item \textbf{PostgreSQL:} users, sessions, private operational data, and fast query projections.
+  \item \textbf{SMTP/Google Drive:} email delivery and evidence files outside the blockchain.
+  \item \textbf{FastAPI:} authorization, validation, and coordination between these systems.
+\end{itemize}
+
+A PostgreSQL projection changes only after Fabric confirms the transaction. Expiring tokens, evidence bytes, OAuth secrets, and private keys are never placed on the shared ledger.
+
+\callout{\textbf{Lifecycle rule:} decompose by behavior and trust boundary, implement the smallest complete slice, verify normal and failure paths, document the operational change, then commit it independently.}
+
+\section{Prompt Engineering}
+
+Prompts are treated as engineering specifications, not one-line requests. The following principles emerged through the project:
+
+\begin{itemize}
+  \item \textbf{Give context:} name the stack, current feature, actor, and architecture boundaries.
+  \item \textbf{Ask for one outcome:} keep each prompt small enough for one focused commit.
+  \item \textbf{Define behavior:} state inputs, outputs, permissions, and data changes.
+  \item \textbf{Include failure cases:} cover invalid signatures, wrong roles, expired links, duplicates, and unavailable services.
+  \item \textbf{Protect existing work:} inspect first, preserve unrelated edits, and stage only intended files.
+  \item \textbf{Demand evidence:} run tests and report changed files, limitations, and the proposed commit message.
+\end{itemize}
+
+This changed a broad request such as ``replace the backend with blockchain'' into a verifiable sequence: create canonical event bytes, sign locally, submit to Fabric, wait for confirmation, and only then update the PostgreSQL projection. If Fabric fails, the local domain change is rolled back.
+
+\section{Requirements Traceability}
+
+\begin{tabularx}{\linewidth}{>{\bfseries}p{0.19\linewidth} X >{\raggedright\arraybackslash}p{0.24\linewidth}}
+Class principle & Project application & Evidence\strut \\
+\hline
+Incremental design & Dependency-ordered vertical slices & Git history and staged milestones \\
+Security by design & Scoped roles, local Ed25519 signing, private/off-chain secrets & Architecture and auth services \\
+Failure atomicity & Projection follows confirmed Fabric write & Authority/service tests \\
+Traceability & Requirement, test, docs, and commit align & Conventional feature commits \\
+\end{tabularx}
+
+\newpage
+\section{Structured Debugging}
+
+Debugging follows a repeatable evidence-driven loop:
+
+\begin{enumerate}
+  \item \textbf{Reproduce and classify.} Record the exact command, request, response code, logs, environment, and expected behavior. Decide whether the fault is browser, API, database, SMTP, Docker, Fabric gateway, or chaincode.
+  \item \textbf{Check dependencies from the outside in.} Use health/status commands, container state, port ownership, configuration presence, migrations, and then service logs. A \texttt{401} from \texttt{/api/auth/session} while logged out is expected; a failed health check is not.
+  \item \textbf{Form one falsifiable hypothesis.} Change one variable and use the smallest direct test: API call before UI, Mailpit inbox before real SMTP, Fabric query before PostgreSQL projection, or a focused unit test before the full suite.
+  \item \textbf{Fix the root cause and add a guard.} Prefer explicit startup errors, bounded state transitions, and reusable status commands over hiding symptoms.
+  \item \textbf{Verify and document.} Re-run the reproducer and regression tests, inspect the diff, and update setup and troubleshooting instructions when an operational assumption changed.
+\end{enumerate}
+
+Examples from development:
+
+\begin{itemize}
+  \item \textbf{Docker socket error:} checked the host service manager first, removed the assumption that \texttt{systemd} always exists, and added Docker/database/Mailpit status targets.
+  \item \textbf{Email accepted but not received:} separated API acceptance from delivery and confirmed that Mailpit captures local mail at port 8025 instead of sending it externally.
+  \item \textbf{Login service unavailable:} checked database health, migrations, SMTP settings, and backend logs before changing the frontend.
+  \item \textbf{Occupied development ports:} stopped only Uvicorn/Vite processes belonging to this checkout rather than killing unrelated processes.
+\end{itemize}
+
+\section{Version Control (Git)}
+
+Git is used as an audit trail for both implementation and decisions:
+
+\begin{itemize}
+  \item Each commit represents one capability, for example advisor access, PoR grant, PoR revocation, competitions, immutable results, or credential issuance.
+  \item Recent commits use clear prefixes such as \texttt{feat}, \texttt{fix}, and \texttt{test} so their purpose is easy to scan.
+  \item Before committing, \texttt{git status --short} finds unrelated changes and \texttt{git diff --cached} verifies the exact staged patch.
+  \item Targeted \texttt{git add} commands prevent unrelated work from entering a feature commit.
+  \item Prompts and decisions are summarized in commit messages and project documentation when they affect the design.
+  \item \texttt{.env}, keys, virtual environments, dependencies, build output, and Fabric runtime identities are ignored.
+\end{itemize}
+
+\section{Testing, Refactoring, and Documentation}
+
+\textbf{Testing}
+\begin{itemize}
+  \item Backend pytest tests cover migrations, email verification, sessions, administrator operations, and service preflight checks.
+  \item Node tests cover Fabric chaincode behavior.
+  \item Negative tests cover wrong domains/roles/clubs, expired links, invalid signatures, duplicate requests, immutable versions, and Fabric failure rollback.
+  \item Frontend checks currently include TypeScript validation and a production Vite build. Browser/component tests remain future work.
+\end{itemize}
+
+\textbf{Refactoring}
+\begin{itemize}
+  \item The old PostgreSQL hash chain remains read-only as \texttt{LegacyLedgerEntry}; new institutional writes use Fabric.
+  \item Shared session checks, canonical event construction, and projection rules reduce duplicated security logic.
+  \item External behavior is preserved and regression tests are run after structural changes.
+\end{itemize}
+
+\textbf{Documentation}
+\begin{itemize}
+  \item The README contains setup and demo commands; the architecture document explains component and data ownership.
+  \item Schema, administrator bootstrap, and Fabric operations have separate focused guides.
+  \item Safe \texttt{.env.example} files document configuration without exposing secrets.
+  \item Make targets turn start, stop, and status instructions into repeatable commands.
+\end{itemize}
+
+\newpage
+\section{Appendix: Sample Prompts}
+
+The examples below show how broad conversational requests were converted into precise, testable prompts. They are shortened to highlight the engineering principles used.
+
+\subsection{A. Architecture migration}
+
+\textbf{Initial request}\par
+\callout{``I would like a blockchain in the backend. Hyperledger would be my choice. Please replace the current backend with that.''}
+
+\textbf{Engineered prompt}\par
+\callout{Inspect the existing FastAPI/PostgreSQL implementation first. Keep FastAPI as a thin API. Make Hyperledger Fabric authoritative only for institutional events; retain PostgreSQL for users, sessions, private data, and query projections. Submit a signed canonical event to Fabric and update the projection only after commit confirmation. Keep email, evidence bytes, OAuth tokens, and private keys off-chain. Preserve unrelated edits, add failure/rollback tests, run them, and provide targeted staging and commit commands without committing automatically.}
+
+\textbf{Why it is better:} it defines the architecture, data ownership, transaction order, security exclusions, failure behavior, verification, and change-control boundary.
+
+\subsection{B. Credential revocation}
+
+\textbf{Initial request}\par
+\callout{``Advisor can revoke PoRs.''}
+
+\textbf{Engineered prompt}\par
+\callout{Add prepare/submit endpoints for advisor-signed PoR revocation. The prepare step returns deterministic canonical bytes; submit verifies the Ed25519 signature, active advisor appointment, club scope, request expiry, and idempotency key. Record an immutable revocation event on Fabric, retain the original grant, and update PostgreSQL only after ledger confirmation. Test wrong-club access, invalid/expired signatures, duplicate submission, already-revoked roles, concurrent handover, and Fabric rollback.}
+
+\textbf{Why it is better:} the prompt converts an ambiguous delete operation into an auditable state transition with explicit authorization and race conditions.
+
+\subsection{C. Debugging an email failure}
+
+\textbf{Observed symptom}\par
+\callout{``The backend returned 202 Accepted, but I did not get an email'' and later ``service not available.''}
+
+\textbf{Engineered diagnostic prompt}\par
+\callout{Reproduce the request and capture browser network details plus backend logs. Check \texttt{/api/health}, PostgreSQL container health, Alembic revision, SMTP host/port, and Mailpit status/inbox in that order. Confirm whether the environment is local capture or real delivery. Call the email endpoint directly to isolate the UI. Do not weaken the generic 202 anti-enumeration response. Fix the failing boundary, add a regression/preflight test, and document the exact startup/status command.}
+
+\textbf{Why it is better:} it distinguishes successful request acceptance from downstream delivery, preserves a security property, and produces a reproducible diagnostic path.
+
+\subsection{D. Standard template for future commits}
+
+\callout{\textbf{Context} (inspect current code and invariants) $\rightarrow$ \textbf{one outcome} (actor and behavior) $\rightarrow$ \textbf{constraints} (authorization, privacy, atomicity, idempotency) $\rightarrow$ \textbf{failure cases} $\rightarrow$ \textbf{tests and docs} $\rightarrow$ \textbf{reviewable Git commands}.}
+
+This template makes AI assistance accountable: generated code is not accepted because it appears plausible; it must fit the architecture, survive negative tests, preserve unrelated work, and leave a readable history.
+
+\end{document}

@@ -1,4 +1,5 @@
 # Local plan and configuration
+/REMAINING_IMPLEMENTATION_PROMPTS.md
 .env
 .env.*
 !.env.example

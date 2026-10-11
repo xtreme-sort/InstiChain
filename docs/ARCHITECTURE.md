@@ -100,63 +100,9 @@ Use `make mailpit`, `make status-mailpit` and `make stop-mailpit` to manage the
 local SMTP test server. Its browser inbox is available at
 <http://127.0.0.1:8025>.
 
+Use `make database`, `make status-database` and `make stop-database` to manage
+PostgreSQL without deleting its persistent Docker volume.
+
 On Linux and WSL, `make docker` starts the Docker daemon using the active system
 service manager, and `make status-docker` checks daemon access. Docker Desktop
 must be opened through its desktop application.
-
-## Implemented today
-
-- Institute-only email verification and passwordless returning login.
-- Server-side sessions with revocation and secure-cookie behavior.
-- Controlled initial administrator bootstrap.
-- Club creation and faculty-advisor appointment.
-- Club-scoped advisor access, advisor-signed club role grants and revocation.
-- Club-scoped competitions, immutable versioned result submissions and
-  advisor-signed team credential issuance.
-- Fabric events for `ADMIN_BOOTSTRAPPED`, `CLUB_CREATED`, `ADVISOR_APPOINTED`,
-  `ROLE_GRANTED`, `ROLE_REVOKED` and `ACHIEVEMENT_ISSUED`.
-- Two-organization Fabric endorsement policy requiring Org1 and Org2.
-- Direct audit endpoints at `/api/ledger/health`, `/api/ledger/events` and
-  `/api/ledger/events/{request_id}`.
-- The public revocation list at `/api/ledger/revocations`,
-  `/api/ledger/revocations/{type}/{id}` and `/api/ledger/fabric-revocations`.
-
-Credential revocation (`ACHIEVEMENT_REVOKED`) is validated and indexed by the
-chaincode and listed by the revocation endpoints, but has no write endpoint yet.
-Share links, QR verification pages and the student vault remain future modules,
-and must follow the same commit-first flow above.
-
-## Revocation and the revocation list
-
-Revocation is an appended event, never an edit: `ROLE_REVOKED` records the end of
-authority and the projection's `revoked_at`/`revocation_transaction_id` pair is
-set only after Fabric confirms. The chaincode refuses a revocation whose subject
-has no granting event or is already revoked, and maintains a `revocation:`
-subject index so a verifier's "is this revoked?" question is a direct lookup
-rather than a replay of the whole ledger.
-
-The write side belongs to the club's faculty advisor and is signed in the
-browser with their own key (`app/advisor.py`), matching the design document's
-role matrix. The read side below is separate, public and authority-free: it
-reports what the ledger already says, so it needs no signing key.
-
-The read endpoints are deliberately unauthenticated: an external placement
-verifier holds a student's share link, not an institute account. They return
-`checked_at` because, as the design document notes, an offline signature check
-cannot establish that no later revocation exists. An absent entry means "not
-revoked as of `checked_at`" — it is not a proof of validity, and a verifier that
-cannot reach this endpoint must report status unknown rather than valid.
-`/api/ledger/fabric-revocations` reads the on-chain index directly so the
-PostgreSQL projection can be audited against Fabric.
-
-## Where to add the next feature
-
-1. Add deterministic validation and event handling to
-   `fabric/chaincode/lib/instichain-contract.js`.
-2. Add the thin authenticated HTTP endpoint under `backend/app/`.
-3. Update PostgreSQL only when private fields or a query projection are needed.
-4. Add the corresponding React workflow under `frontend/src/`.
-5. Test chaincode validation, API authorization and projection behavior.
-
-Do not put verification tokens, sessions, private keys, full evidence files or
-other deletable personal data into Fabric.

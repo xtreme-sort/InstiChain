@@ -1,9 +1,12 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-down fabric-gateway
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-down fabric-gateway
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
 	@echo "make status-docker  Check whether the Docker daemon is available"
+	@echo "make database       Start PostgreSQL and wait until it is healthy"
+	@echo "make status-database Show the PostgreSQL container status"
+	@echo "make stop-database  Stop PostgreSQL while preserving its data"
 	@echo "make frontend       Restart frontend in this terminal (port 5173)"
 	@echo "make backend        Restart backend in this terminal (port 8000)"
 	@echo "make mailpit        Start the local email server and inbox"
@@ -36,6 +39,16 @@ docker:
 
 status-docker:
 	@docker info >/dev/null 2>&1 && echo "Docker is running." || { echo "Docker is stopped or inaccessible." >&2; exit 1; }
+
+database:
+	@docker compose up -d --wait db
+	@echo "PostgreSQL is ready at 127.0.0.1:5432."
+
+status-database:
+	@docker compose ps db
+
+stop-database:
+	@docker compose stop db
 
 frontend:
 	@bash scripts/dev.sh frontend start

@@ -130,7 +130,7 @@ The health response is `{"status":"ok"}`.
 From the repository root, start the local PostgreSQL service:
 
 ```bash
-docker compose up -d --wait db
+make database
 ```
 
 The local-only database uses database/user/password `instichain` on
@@ -175,7 +175,8 @@ python -m alembic check
 
 `python -m alembic downgrade base` drops these tables and their data. Use it only
 on disposable databases when checking rollback. Stop the local database from the
-repository root with `docker compose stop db`; this preserves its volume.
+repository root with `make stop-database`; this preserves its volume. Use
+`make status-database` to inspect its container state.
 
 See [database schema notes](backend/SCHEMA.md) for relationships and the boundary
 between database constraints and future authorization/signature validation.
