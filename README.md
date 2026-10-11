@@ -1,386 +1,148 @@
 # InstiChain
 
-Faculty-authorized campus competition records and achievement verification.
+InstiChain records faculty-authorized campus roles and competition achievements.
+Its application and smart-contract backends are Java; its browser client is React
+with TypeScript.
 
-Start with [Architecture and code map](docs/ARCHITECTURE.md) to see which data
-belongs in Fabric, PostgreSQL and external services, and where each feature lives.
-
-The project provides a React + TypeScript frontend, a FastAPI backend,
-configuration templates, institute email verification, session-based login and a
-Hyperledger Fabric ledger for administrator events. PostgreSQL stores accounts,
-sessions and application projections; Fabric is the authoritative audit record.
+See [the architecture and code map](docs/ARCHITECTURE.md) for the boundary between
+Fabric, PostgreSQL, and email infrastructure.
 
 ## Requirements
 
+- Java 21
 - Node.js 22.12 or newer and npm
-- Python 3.12 or newer with `pip` and `venv`
-- Docker with Compose (PostgreSQL, Mailpit and the local Fabric network)
-- `curl`, OpenSSL and Git for the official Fabric development runtime
+- Docker with Compose
+- `curl`, OpenSSL, and Git
 
-Cloud credentials are not required for the local test inbox. The frontend and API
-health endpoint still start without a database; email verification requires
-PostgreSQL and an SMTP server.
+Maven and Gradle do not need system installations. The repository contains pinned
+launchers that download their distributions on first use.
 
-## Project Structure
+## Project structure
 
 ```text
-backend/
-  app/
-    config.py          Environment settings
-    database.py        SQLAlchemy base, engine and session dependency
-    main.py            FastAPI app and GET /api/health
-    models.py          Users, sessions, clubs, appointments, competitions, credentials, ledger
-    verification.py    Institute email request and confirmation endpoints
-    session.py          Session cookie dependency, session lookup and logout
-    email_delivery.py  SMTP verification and login messages
-  migrations/          Versioned Alembic migrations
-  tests/               PostgreSQL migration and constraint tests
-  alembic.ini          Migration configuration
-  .env.example         Backend configuration template
-  requirements.txt     Python dependencies
-  requirements-dev.txt Additional test dependencies
-frontend/
-  src/                 React app and styles
-  .env.example         Development API proxy configuration
-  package.json         Frontend scripts and dependencies
-  package-lock.json    Frontend dependency lockfile
-  vite.config.ts       Development server and API proxy
-fabric/
-  chaincode/           InstiChain Fabric smart contract
-  gateway/             Node bridge using the official Fabric Gateway SDK
-  README.md            Fabric installation, topology and demo commands
+backend/                 Spring Boot API, Flyway migrations, and Java tests
+fabric/chaincode/        Hyperledger Fabric Java smart contract
+frontend/                React and TypeScript browser client
+scripts/                 Development and Fabric lifecycle commands
+docs/ARCHITECTURE.md     System design and source-code map
+compose.yaml             PostgreSQL and Mailpit
+Makefile                 Common local commands
 ```
 
-## Backend Setup
+## First-time setup
 
-### Start and Stop Commands (Linux/WSL)
-
-After installing dependencies, run these from the repository root in two separate
-terminals:
+From the repository root:
 
 ```bash
+cp backend/.env.example backend/.env
+cd frontend && npm ci && cp .env.example .env && cd ..
 make docker
+make database
+make mailpit
+make fabric-install
+make fabric-up
 ```
 
-This starts the Docker daemon through systemd on a systemd host or the traditional
-`service` command on WSL/Linux without systemd. Docker Desktop users should open
-Docker Desktop instead. Confirm availability with `make status-docker`.
+If `backend/.env` already exists, keep it and add the new JDBC and direct Fabric
+settings from `.env.example`. The default database settings match `compose.yaml`.
+Flyway applies the schema automatically when Spring Boot starts.
+
+For a Fabric network already running the former JavaScript chaincode, run
+`make fabric-up` to start or resume it, then run `make fabric-upgrade` once. This
+preserves its ledger and installs the compatible Java contract at sequence 2.
+
+## Start the application
+
+Use separate terminals at the repository root:
 
 ```bash
 make backend
-```
-
-```bash
 make frontend
 ```
 
-Start the local email inbox in either terminal:
+Open:
+
+- Application: <http://127.0.0.1:5173>
+- API health: <http://127.0.0.1:8000/api/health>
+- Mailpit inbox: <http://127.0.0.1:8025>
+
+Useful process commands:
 
 ```bash
-make mailpit
+make status
+make status-docker
+make status-database
+make status-mailpit
+make stop
+make stop-database
+make stop-mailpit
 ```
 
-Open Mailpit at <http://127.0.0.1:8025>.
+`make backend` supplies the local Fabric test-network identity path automatically.
+The backend talks directly to the peer through the Java Fabric Gateway client;
+there is no extra gateway process to start.
 
-Each command stops existing servers for that service in this checkout, then
-starts a fresh foreground server. The backend runs at <http://127.0.0.1:8000>
-with reload enabled; the frontend runs at <http://127.0.0.1:5173>.
-Use `Ctrl+C` in the terminal to stop its server, or run:
+## Email-link login
+
+1. Enter an `iitm.ac.in` email or a proper subdomain such as
+   `student@smail.iitm.ac.in`.
+2. Open Mailpit and follow the received link.
+3. A new user enters a name once. A returning user confirms sign-in without a
+   name field, and the stored identity and name remain unchanged.
+4. The link expires after 15 minutes and can be used only once.
+
+Only SHA-256 hashes of verification and session tokens are stored. Sessions use
+an HTTP-only cookie and persist across browser reloads until logout or expiry.
+Email ownership creates a basic user only; it grants no administrator or advisor
+permissions.
+
+## Administrator setup
+
+After the intended administrator has signed in once, follow
+[the controlled bootstrap guide](backend/ADMIN_SETUP.md). Bootstrap, club
+creation, advisor appointments, advisor role grants/revocations, and credential
+issuance all require confirmed Fabric transactions.
+
+## Ledger inspection
 
 ```bash
-make stop           # Stop both app servers
-make stop-backend   # Stop only the backend
-make stop-frontend  # Stop only the frontend
-make stop-mailpit   # Stop the local email server
-make status         # Show project server PIDs
-make status-mailpit # Show the Mailpit container status
+curl http://127.0.0.1:8000/api/ledger/health
+curl 'http://127.0.0.1:8000/api/ledger/events?start_sequence=1&limit=50'
+curl http://127.0.0.1:8000/api/ledger/revocations
+curl http://127.0.0.1:8000/api/ledger/fabric-revocations
 ```
 
-You can also run `bash scripts/dev.sh backend start` or
-`bash scripts/dev.sh frontend start` directly; replace `start` with `stop` or
-`status` as needed. The runner identifies same-user Vite/Uvicorn processes by this checkout's working directory,
-including servers started manually, and stop their child processes. Unrelated
-processes occupying the ports are left alone and cause startup to fail clearly.
-PostgreSQL and Mailpit containers are not stopped or restarted. These commands do
-not install dependencies, apply migrations or bootstrap an administrator.
+The events response shows sequence, transaction ID, actor, object IDs, payload,
+signature, submitting MSP, and commit time. PostgreSQL contains private data and
+fast projections; Fabric is authoritative for issued institutional records.
 
-### Manual Setup
-
-From the repository root, in the first terminal:
+## Tests
 
 ```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-cp .env.example .env
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+make test
 ```
 
-On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell and use
-`Copy-Item .env.example .env`. Use `python` if `python3` is unavailable.
-
-- Health: <http://127.0.0.1:8000/api/health>
-- Interactive API documentation: <http://127.0.0.1:8000/docs>
-
-The health response is `{"status":"ok"}`.
-
-## Database Setup
-
-From the repository root, start the local PostgreSQL service:
+Or run layers separately:
 
 ```bash
-make database
+make backend-test
+make fabric-test
+make frontend-test
 ```
-
-The local-only database uses database/user/password `instichain` on
-`127.0.0.1:5432`. Its data persists in the Compose volume. With an existing
-PostgreSQL installation, create a database and set `INSTICHAIN_DATABASE_URL` in
-`backend/.env` to its connection URL instead. If port 5432 is occupied, use the
-existing database or change the Compose host port and the connection URL together.
-
-From the repository root, apply the migration:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python -m alembic upgrade head
-python -m alembic current
-```
-
-For an existing checkout, add `INSTICHAIN_DATABASE_URL` from `.env.example` to
-your existing `.env`; do not overwrite your other settings. The default URL also
-matches the Compose database. Revision `0001` creates the six core tables.
-Revision `0002` adds hashed email verification tokens. Revision `0003` adds
-hashed login sessions.
-Revision `0005` redirects ledger references to Fabric transaction receipts while
-retaining the former PostgreSQL hash-chain rows as read-only legacy history.
-Migrations run explicitly; starting FastAPI never creates or changes tables.
-
-From `backend/`, inspect generated SQL without connecting to PostgreSQL:
-
-```bash
-python -m alembic upgrade head --sql
-```
-
-For future schema changes, edit the models, generate a revision, review it, then
-apply it:
-
-```bash
-python -m alembic revision --autogenerate -m "describe schema change"
-python -m alembic upgrade head
-python -m alembic check
-```
-
-`python -m alembic downgrade base` drops these tables and their data. Use it only
-on disposable databases when checking rollback. Stop the local database from the
-repository root with `make stop-database`; this preserves its volume. Use
-`make status-database` to inspect its container state.
-
-See [database schema notes](backend/SCHEMA.md) for relationships and the boundary
-between database constraints and future authorization/signature validation.
-
-## Frontend Setup
-
-From the repository root, in a second terminal:
-
-```bash
-cd frontend
-npm ci
-cp .env.example .env
-npm run dev
-```
-
-Open <http://127.0.0.1:5173>. The service status should become **Connected**.
-Use the refresh button to check again after restarting the backend.
-Stop either development server with `Ctrl+C` in its terminal.
-
-## Email Verification and Login
-
-Start the database and local test inbox from the repository root:
-
-```bash
-docker compose up -d --wait db mailpit
-```
-
-Install the updated backend requirements and run `python -m alembic upgrade head`
-from `backend/`, then start the backend and frontend as described above. Add the
-new settings from `backend/.env.example` to your existing `.env` as needed.
-
-1. Open <http://127.0.0.1:5173> and enter an institute email.
-2. Open the local inbox at <http://127.0.0.1:8025> and follow the emailed link.
-3. First-time addresses enter their name and select **Create account**. Returning
-   users see **Confirm sign-in** and select **Sign in**, with no name field.
-   Opening the link only checks its validity; it never consumes it or starts a
-   session without confirmation.
-4. Reloading the page keeps you signed in. Select **Log out** to end the session.
-
-There are no passwords anywhere in this design. Requesting a link for an
-already-verified address sends a sign-in link instead of a new verification link,
-using the same endpoints, rate limits and single-use tokens described below.
-
-Mailpit captures development email locally; it does not deliver to the actual
-institute inbox. For real delivery, configure your SMTP provider using the backend
-settings below, choose `starttls` or `ssl`, and use an authorized sender address.
-Set `INSTICHAIN_PUBLIC_APP_URL` to your HTTPS frontend origin outside localhost.
-If the frontend port changes, update that URL too. Configure the deployed frontend
-to serve `index.html` for `/verify-email` so emailed deep links work.
-
-- `POST /api/auth/email/request` accepts `{"email":"student@smail.iitm.ac.in"}`.
-- `POST /api/auth/email/inspect` accepts `{"token":"<token from email>"}` and
-  returns `requires_name` for a valid link without consuming it or disclosing
-  profile data. Expired, used and invalidated links are rejected.
-- `POST /api/auth/email/confirm` accepts `{"token":"<token from email>","display_name":"Student Name"}`.
-  The name is required only for initial verification. Returning users submit only
-  `token`; their existing name and permanent user ID remain unchanged. On success
-  it verifies (or creates) the account and starts a session.
-- `GET /api/auth/session` returns the signed-in user (`401` if not signed in).
-- `POST /api/auth/logout` revokes the current session; safe to call without one.
-- Addresses must use `iitm.ac.in` or a proper subdomain such as `smail.iitm.ac.in`.
-  Lookalikes, malformed addresses and non-ASCII addresses are rejected. Addresses
-  are trimmed and lowercased; DNS checks are not used as proof of ownership.
-- Links expire after 15 minutes by default. Tokens contain 256 random bits and
-  only their SHA-256 hashes are stored. Raw tokens are never returned by the API
-  or written to application logs. The link uses a URL fragment, which the frontend
-  clears after loading; it is not sent in HTTP access logs. Reopen the original
-  email link if you reload the confirmation page before submitting.
-- Resends are limited to one per minute and five per rolling 24 hours per address.
-  A successful resend invalidates earlier links. Valid email requests return the
-  same accepted response whether the address is new, already verified or
-  throttled; only throttled addresses receive no new email.
-- Confirmation creates a basic verified user (or verifies an existing unverified
-  user while preserving their ID) and issues a session. It grants no appointments
-  or roles; those remain a later milestone.
-- Sessions are a server-side row referenced by a random 256-bit token in an
-  httpOnly, `SameSite=Lax` cookie, marked `Secure` whenever
-  `INSTICHAIN_PUBLIC_APP_URL` is HTTPS. Only the session token's SHA-256 hash is
-  stored. Logging out revokes the row immediately rather than waiting on
-  expiry, matching the ledger's later requirement to recheck authority on every
-  protected request.
-- Database transactions and per-email locks prevent concurrent token reuse and
-  serialize resends with confirmations. SMTP failures roll back token changes and
-  return 503. If SMTP accepts mail but the subsequent database commit fails, that
-  email's link will be invalid; request a new link.
-
-Before public deployment, add a reverse-proxy/IP request limit as well as the
-per-address limits. Retain token rows for at least 24 hours to preserve those
-limits; expired older rows can be removed by a future retention job.
-
-## Administrator Setup
-
-Administrator bootstrap, club creation and advisor onboarding are available after
-migration `0004`. Follow
-[administrator and integration setup](backend/ADMIN_SETUP.md)
-for the controlled bootstrap command, signing-key preparation, institutional
-verification, SMTP delivery checks and read-only Google Drive access probe.
-
-## Verification and the Revocation List
-
-An external verifier needs no institute account. These read-only endpoints report
-current revocation state:
-
-- `GET /api/ledger/revocations` lists revoked appointments and credentials, newest
-  first. `subject=appointment` or `subject=credential` filters it; `limit` and
-  `offset` page it.
-- `GET /api/ledger/revocations/{subject_type}/{subject_id}` answers for one
-  subject, returning `revoked`, `revoked_at` and the revocation transaction.
-- `GET /api/ledger/fabric-revocations` returns Fabric's own revocation index so
-  the PostgreSQL projection can be audited against the ledger.
-
-Every response carries `checked_at`. An absent entry means "not revoked as of that
-time", which is not a proof of validity: a signature check alone cannot establish
-that no later revocation exists, so a verifier that cannot reach these endpoints
-must report status unknown rather than valid.
-
-Revocations are written by the faculty advisor who holds authority over the club,
-through the advisor-signed endpoints under `/api/advisor/clubs/{club_id}/roles/`.
-The reason is stored on Fabric, so record an institutional justification rather
-than personal details. Credential revocation events are already validated and
-indexed by the chaincode but have no write endpoint until credential revocation
-is built on top of issuance.
-
-No account is promoted by signup. Private keys stay outside Git. Real SMTP inbox
-delivery and Drive test-account access require your own provider configuration.
-
-Before bootstrapping an administrator, follow
-[the Fabric development-network guide](fabric/README.md). Administrator bootstrap,
-club creation and advisor appointment require a confirmed Fabric commit.
 
 ## Configuration
 
-| File | Variable | Default | Purpose |
-| --- | --- | --- | --- |
-| `backend/.env` | `INSTICHAIN_APP_NAME` | `InstiChain API` | API documentation title |
-| `backend/.env` | `INSTICHAIN_DATABASE_URL` | `postgresql+psycopg://instichain:instichain@127.0.0.1:5432/instichain` | PostgreSQL connection used by migrations and database sessions |
-| `backend/.env` | `INSTICHAIN_PUBLIC_APP_URL` | `http://127.0.0.1:5173` | Trusted frontend origin for emailed links |
-| `backend/.env` | `INSTICHAIN_VERIFICATION_TTL_MINUTES` | `15` | Link lifetime, from 1 to 60 minutes |
-| `backend/.env` | `INSTICHAIN_SESSION_TTL_DAYS` | `30` | Session lifetime after signing in, from 1 to 365 days |
-| `backend/.env` | `INSTICHAIN_SMTP_HOST` / `INSTICHAIN_SMTP_PORT` | `127.0.0.1` / `1025` | SMTP server |
-| `backend/.env` | `INSTICHAIN_SMTP_SECURITY` | `plain` | `plain` for local Mailpit, `starttls` or `ssl` for real delivery |
-| `backend/.env` | `INSTICHAIN_SMTP_FROM` | `InstiChain <no-reply@instichain.local>` | Sender address |
-| `backend/.env` | `INSTICHAIN_SMTP_USERNAME` / `INSTICHAIN_SMTP_PASSWORD` | unset | Optional SMTP credentials; keep in local environment only |
-| `backend/.env` | `INSTICHAIN_FABRIC_BRIDGE_URL` | `http://127.0.0.1:3001` | Private Node Gateway bridge used to submit and query Fabric transactions |
-| `backend/.env` | `INSTICHAIN_FABRIC_BRIDGE_TOKEN` | unset | Shared secret for the loopback bridge; must match `fabric/.env` |
-| `frontend/.env` | `API_PROXY_TARGET` | `http://127.0.0.1:8000` | Backend destination for the Vite development proxy |
+All backend settings live in the ignored `backend/.env`; the committed template
+is `backend/.env.example`.
 
-Both apps work with defaults when `.env` is absent. Restart the relevant server
-after configuration changes. Vite proxies `/api` requests to the backend during
-development, so the browser uses the same origin and no CORS configuration is
-needed. Never put secrets into frontend `VITE_` variables: they are public.
+| Setting | Purpose |
+| --- | --- |
+| `INSTICHAIN_JDBC_URL` | PostgreSQL JDBC connection |
+| `INSTICHAIN_DATABASE_USER`, `INSTICHAIN_DATABASE_PASSWORD` | Database login |
+| `INSTICHAIN_PUBLIC_APP_URL` | Trusted frontend origin and email-link base |
+| `INSTICHAIN_SMTP_*` | Mailpit or real SMTP provider |
+| `INSTICHAIN_ADMIN_SIGNING_KEY_FILE` | Protected administrator Ed25519 key |
+| `INSTICHAIN_FABRIC_*` | Fabric channel, chaincode, peer, identity, and TLS paths |
 
-If a port is occupied, run the backend with `--port 8001` and update
-`API_PROXY_TARGET`, or run the frontend with `npm run dev -- --port 5174`.
-
-## Verification and Build
-
-From `backend/`, run database integration tests against a local test database:
-
-```bash
-python -m pip install -r requirements-dev.txt
-INSTICHAIN_TEST_DATABASE_URL=postgresql+psycopg://instichain:instichain@127.0.0.1:5432/instichain python -m unittest discover -s tests -v
-```
-
-Tests create a randomly named schema, apply migrations, check constraints and
-rollback/reapply behavior, then remove only their own schema. The test database
-user needs permission to create schemas. Without the test URL, database tests
-are explicitly skipped. Use a local development database, not production.
-The tests mock delivery and never send external email. They cover domain
-validation, expiry, token reuse, resend limits, failed delivery and concurrent
-requests/confirmations, in addition to the schema checks. Domain and SMTP message
-unit tests run even without a database URL.
-
-With both servers running:
-
-```bash
-curl --fail http://127.0.0.1:8000/api/health
-curl --fail http://127.0.0.1:5173/api/health
-```
-
-From `frontend/`:
-
-```bash
-npm run typecheck
-npm run build
-```
-
-The build writes assets to `frontend/dist/`. `npm run preview` previews static
-assets only; it does not provide the development API proxy. A deployment must
-serve assets and route `/api` to FastAPI on the same origin. These local startup
-commands are not a production deployment configuration.
-
-## Git
-
-Commit source files, `.env.example` templates and `frontend/package-lock.json`.
-Local `.env` files, dependencies, build output and private planning notes are
-ignored. No credentials are included in the repository.
-
-## Framework References
-
-- [Vite guide](https://vite.dev/guide/)
-- [FastAPI first steps](https://fastapi.tiangolo.com/tutorial/first-steps/)
-- [Pydantic settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/)
-- [Alembic migrations](https://alembic.sqlalchemy.org/en/latest/tutorial.html)
-- [SQLAlchemy declarative models](https://docs.sqlalchemy.org/en/20/orm/declarative_tables.html)
-- [FastAPI testing](https://fastapi.tiangolo.com/tutorial/testing/)
-- [Python SMTP client](https://docs.python.org/3/library/smtplib.html)
+Local Compose credentials and Fabric test-network identities are development-only.
+Production organizations must operate their Fabric nodes and keys independently.

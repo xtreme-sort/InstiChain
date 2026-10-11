@@ -1,108 +1,83 @@
 # InstiChain Architecture and Code Map
 
-## System boundary
+## Runtime boundary
 
 ```text
-Browser (React)
+React browser client
         |
         v
-Thin HTTP API (FastAPI)
+Spring Boot API (Java 21)
         |
         +-- Hyperledger Fabric: authoritative institutional events
-        +-- PostgreSQL: authentication, private metadata and query projections
-        +-- SMTP / Google Drive: external delivery and file integrations
+        +-- PostgreSQL: authentication, private data, and query projections
+        +-- SMTP / Mailpit: email-link delivery
 ```
 
-Fabric is the authoritative record for institutional actions. PostgreSQL is not
-a competing blockchain: it holds login state, information that must remain
-private, and projections that make screens fast to query. The API protects
-identities and converts browser requests into endorsed Fabric transactions.
+The API authenticates people, enforces authorization, prepares and verifies
+signatures, submits institutional events to Fabric, and maintains PostgreSQL read
+models only after Fabric confirms a write.
 
 ## Data ownership
 
-| Data | Authoritative system | Reason |
-| --- | --- | --- |
-| Administrator bootstrap, club creation, advisor appointment, role grant and role revocation events | Hyperledger Fabric | Immutable, ordered and endorsed by institute and auditor peers |
-| Credential issuance events, and future credential revocation | Hyperledger Fabric | Institutional records must be independently verifiable |
-| Revocation list read model | PostgreSQL projection, indexed on Fabric | Verifiers need one fast status answer; Fabric remains authoritative |
-| Competitions, result submissions and recipients | PostgreSQL | Drafts and versions are private until an advisor approves and issues |
-| Users, email verification tokens and login sessions | PostgreSQL | Private, expiring and operational data must not be permanently replicated |
-| Club and appointment read models | PostgreSQL projection | Efficient UI queries; each write is accepted only after Fabric confirms it |
-| Fabric transaction receipts | PostgreSQL projection | Connects local records to transaction IDs and block numbers |
-| Email messages | SMTP provider or Mailpit | Delivery infrastructure, not ledger state |
-| Evidence files | Google Drive or another object store | Fabric should contain only durable references/digests, not file bytes |
-| Private keys and service tokens | Ignored environment or secret manager | Secrets must never enter Git, PostgreSQL or Fabric |
+| Data | Authoritative system |
+| --- | --- |
+| Users, email links, sessions | PostgreSQL |
+| Clubs, appointments, credentials | Fabric events; PostgreSQL query projection |
+| Competitions, submissions, recipients | PostgreSQL until credential issuance |
+| Fabric transaction receipts | PostgreSQL projection |
+| Email messages | SMTP provider or Mailpit |
+| Private keys and service credentials | Local ignored files or a secret manager |
 
-The old `ledger_entries` PostgreSQL hash chain is migration history only. In code
-it is deliberately named `LegacyLedgerEntry`, and no application service writes
-to it.
+The legacy `ledger_entries` table is retained only for old migration history. New
+institutional records are never written to it.
 
-## Request flow
+## Confirmed-write flow
 
-For a club or advisor change:
+1. React sends an authenticated request to Spring Boot.
+2. The API validates the session, role, club scope, and request.
+3. The appropriate authority signs a canonical event document.
+4. The Java Fabric Gateway client sends it directly to the Org1 peer.
+5. Org1 and Org2 endorse it; Java chaincode validates and stores the event.
+6. After a valid commit, the API records the receipt and updates its PostgreSQL
+   projection in the same local transaction.
 
-1. React sends an authenticated request to FastAPI.
-2. FastAPI validates the session, administrator role and request.
-3. The authority service signs a canonical event.
-4. The Node Gateway bridge submits it to the Fabric peer.
-5. The chaincode validates it; Org1 and Org2 must both endorse the write.
-6. After Fabric reports a valid commit, FastAPI stores the receipt and updates
-   the PostgreSQL read model in one local transaction.
-7. Read screens query the projection; audit screens query Fabric directly.
+If Fabric does not confirm the event, the PostgreSQL domain change rolls back.
 
-If Fabric is unavailable, the domain change is rejected and no local club or
-appointment is committed.
-
-## Directory map
+## Code map
 
 ```text
-frontend/
-  src/App.tsx                 Application shell and session-aware routing
-  src/EmailVerification.tsx   Email-link registration and returning login
-  src/AdminPanel.tsx          Club creation and advisor appointment UI
-  src/styles.css              Shared presentation
+frontend/src/
+  App.tsx                    Session-aware application shell
+  EmailVerification.tsx      Email-link registration and login
+  AdminPanel.tsx             Club and advisor administration
 
 backend/
-  app/main.py                 FastAPI composition and process health route
-  app/verification.py         Institute email validation and single-use links
-  app/session.py              Login sessions, cookies and logout
-  app/email_delivery.py       SMTP delivery
-  app/admin.py                Protected club/advisor HTTP endpoints
-  app/advisor.py              Advisor-signed club role grants and revocation
-  app/permissions.py          Club-scoped role and authority checks
-  app/competitions.py         Club-scoped competition workflow
-  app/results.py              Immutable versioned result submissions
-  app/issuance.py             Advisor-signed team credential issuance
-  app/authority.py            Event signing, Fabric submission and receipts
-  app/ledger.py               Read-only Fabric audit API and revocation list
-  app/models.py               Auth/private tables and local projections
-  app/bootstrap.py            Operator-only administrator/key commands
-  app/preflight.py            SMTP and Drive connectivity checks
-  migrations/                 Immutable PostgreSQL schema history
-  tests/                      Backend and migration tests
+  pom.xml                    Spring Boot and Fabric Gateway dependencies
+  mvnw                       Pinned Maven launcher
+  src/main/java/edu/iitm/instichain/
+    auth/                    Institute email, tokens, sessions, SMTP
+    cli/                     Operator-only keygen and admin bootstrap
+    common/                  Errors, canonical JSON, signatures, UUIDs
+    config/                  Typed environment configuration and transactions
+    domain/                  Clubs, advisors, roles, competitions, results, issuance
+    fabric/                  Direct Gateway client, receipts, audit API
+    web/                     Health endpoint
+  src/main/resources/
+    application.yml          Environment bindings
+    db/migration/            Flyway database migrations
+  src/test/                  Java tests
 
-fabric/
-  chaincode/lib/instichain-contract.js  On-chain validation and event storage
-  chaincode/test/                       Smart-contract unit tests
-  gateway/src/server.js                 Official Fabric Gateway SDK bridge
-  README.md                             Fabric network setup and operations
-  runtime/                              Downloaded identities/runtime (ignored)
+fabric/chaincode/
+  build.gradle               Java chaincode build
+  src/main/java/             Ledger contract
+  src/test/java/             Contract tests
+  gradlew                    Pinned Gradle wrapper
 
 scripts/
-  dev.sh                      Shared frontend/backend start-stop-status runner
-  fabric.sh                   Fabric install, deploy, stop and Gateway runner
-
-compose.yaml                  PostgreSQL and local Mailpit
-Makefile                      Human-friendly development commands
+  dev.sh                     Frontend/backend start, stop, and status
+  fabric.sh                  Fabric install, deploy, upgrade, and teardown
 ```
 
-Use `make mailpit`, `make status-mailpit` and `make stop-mailpit` to manage the
-local SMTP test server. Its browser inbox is available at
-<http://127.0.0.1:8025>.
-
-Use `make database`, `make status-database` and `make stop-database` to manage
-PostgreSQL without deleting its persistent Docker volume.
-
-On Linux and WSL, `make docker` starts the Docker daemon using the active system
-service manager, and `make status-docker` checks daemon access. Docker Desktop
-must be opened through its desktop application.
+The React frontend remains TypeScript because the Java requirement applies to
+the server and blockchain application layers. There is no Python backend, Node
+gateway bridge, or JavaScript chaincode in the tracked runtime architecture.

@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: ${INSTICHAIN_APP_NAME:InstiChain API}
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${INSTICHAIN_JDBC_URL:jdbc:postgresql://127.0.0.1:5432/instichain}
+    username: ${INSTICHAIN_DATABASE_USER:instichain}
+    password: ${INSTICHAIN_DATABASE_PASSWORD:instichain}
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 1
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    deserialization:
+      fail-on-unknown-properties: true
+  mvc:
+    problemdetails:
+      enabled: false
+
+server:
+  address: 127.0.0.1
+  port: 8000
+  error:
+    include-message: never
+
+instichain:
+  app-name: ${INSTICHAIN_APP_NAME:InstiChain API}
+  public-app-url: ${INSTICHAIN_PUBLIC_APP_URL:http://127.0.0.1:5173}
+  verification-ttl-minutes: ${INSTICHAIN_VERIFICATION_TTL_MINUTES:15}
+  session-ttl-days: ${INSTICHAIN_SESSION_TTL_DAYS:30}
+  admin-signing-key-file: ${INSTICHAIN_ADMIN_SIGNING_KEY_FILE:}
+  drive-test-access-token: ${INSTICHAIN_DRIVE_TEST_ACCESS_TOKEN:}
+  drive-test-file-id: ${INSTICHAIN_DRIVE_TEST_FILE_ID:}
+  smtp:
+    host: ${INSTICHAIN_SMTP_HOST:127.0.0.1}
+    port: ${INSTICHAIN_SMTP_PORT:1025}
+    security: ${INSTICHAIN_SMTP_SECURITY:plain}
+    username: ${INSTICHAIN_SMTP_USERNAME:}
+    password: ${INSTICHAIN_SMTP_PASSWORD:}
+    from: ${INSTICHAIN_SMTP_FROM:InstiChain <no-reply@instichain.local>}
+  fabric:
+    channel-name: ${INSTICHAIN_FABRIC_CHANNEL_NAME:instichain}
+    chaincode-name: ${INSTICHAIN_FABRIC_CHAINCODE_NAME:instichain}
+    msp-id: ${INSTICHAIN_FABRIC_MSP_ID:Org1MSP}
+    crypto-path: ${INSTICHAIN_FABRIC_CRYPTO_PATH:}
+    key-directory: ${INSTICHAIN_FABRIC_KEY_DIRECTORY:}
+    cert-directory: ${INSTICHAIN_FABRIC_CERT_DIRECTORY:}
+    tls-cert-path: ${INSTICHAIN_FABRIC_TLS_CERT_PATH:}
+    peer-endpoint: ${INSTICHAIN_FABRIC_PEER_ENDPOINT:localhost:7051}
+    peer-host-alias: ${INSTICHAIN_FABRIC_PEER_HOST_ALIAS:peer0.org1.example.com}

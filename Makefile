@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-down fabric-gateway
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-down fabric-test backend-test frontend-test test
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
@@ -14,17 +14,18 @@ help:
 	@echo "make stop-frontend  Stop only this project's frontend"
 	@echo "make stop-backend   Stop only this project's backend"
 	@echo "make stop-mailpit   Stop Mailpit while preserving its configuration"
-	@echo "make status         Show running project server PIDs"
+	@echo "make status         Show app, database, mail, and Fabric status"
 	@echo "make status-mailpit Show the Mailpit container status"
 	@echo "make fabric-install Download pinned Fabric runtime and samples"
 	@echo "make fabric-up      Start two-organization Fabric and deploy chaincode"
+	@echo "make fabric-upgrade Upgrade an existing JS chaincode deployment to Java"
 	@echo "make fabric-down    Delete the local Fabric network and ledger"
-	@echo "make fabric-gateway Start the local Fabric Gateway bridge"
+	@echo "make test           Run backend, chaincode, and frontend checks"
 
 docker:
 	@if docker info >/dev/null 2>&1; then \
 		echo "Docker is already running."; \
-	elif [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then \
+	elif [ "$$(ps -p 1 -o comm= 2>/dev/null)" = systemd ] && command -v systemctl >/dev/null 2>&1; then \
 		echo "Starting Docker with systemd..."; \
 		sudo systemctl start docker; \
 	elif command -v service >/dev/null 2>&1; then \
@@ -76,6 +77,16 @@ stop-mailpit:
 status:
 	@bash scripts/dev.sh frontend status
 	@bash scripts/dev.sh backend status
+	@if docker info >/dev/null 2>&1; then \
+		echo "Docker is running."; \
+		docker compose ps db mailpit; \
+		for container in peer0.org1.example.com peer0.org2.example.com orderer.example.com; do \
+			state="$$(docker inspect --format '{{.State.Status}}' "$$container" 2>/dev/null || echo absent)"; \
+			echo "$$container: $$state"; \
+		done; \
+	else \
+		echo "Docker is stopped or inaccessible; database, Mailpit, and Fabric cannot be checked."; \
+	fi
 
 status-mailpit:
 	@docker compose ps mailpit
@@ -86,8 +97,19 @@ fabric-install:
 fabric-up:
 	@bash scripts/fabric.sh up
 
+fabric-upgrade:
+	@bash scripts/fabric.sh upgrade
+
 fabric-down:
 	@bash scripts/fabric.sh down
 
-fabric-gateway:
-	@bash scripts/fabric.sh gateway
+backend-test:
+	@cd backend && ./mvnw test
+
+fabric-test:
+	@GRADLE_USER_HOME="$(CURDIR)/.gradle" ./fabric/chaincode/gradlew -p fabric/chaincode test
+
+frontend-test:
+	@cd frontend && npm run build
+
+test: backend-test fabric-test frontend-test

@@ -24,13 +24,20 @@ find_servers() {
         executable="${arguments[0]##*/}"
         matched=false
         app=false
-        if [[ "$SERVICE" == backend && ( "$executable" == python* || "$executable" == uvicorn ) ]]; then
-            for argument in "${arguments[@]}"; do
-                [[ "$argument" == uvicorn || "$argument" == */uvicorn ]] && matched=true
-                [[ "$argument" == app.main:app ]] && app=true
-            done
-            if [[ "$matched" == true && "$app" == true ]]; then
-                echo "${process##*/}"
+        if [[ "$SERVICE" == backend ]]; then
+            if [[ "$executable" == python* || "$executable" == uvicorn ]]; then
+                for argument in "${arguments[@]}"; do
+                    [[ "$argument" == uvicorn || "$argument" == */uvicorn ]] && matched=true
+                    [[ "$argument" == app.main:app ]] && app=true
+                done
+                [[ "$matched" == true && "$app" == true ]] && echo "${process##*/}"
+            elif [[ "$executable" == java || "$executable" == mvnw ||
+                    "$executable" == bash || "$executable" == sh ]]; then
+                for argument in "${arguments[@]}"; do
+                    [[ "$argument" == *spring-boot:run* ]] && matched=true
+                    [[ "$argument" == *edu.iitm.instichain.InstiChainApplication* ]] && app=true
+                done
+                [[ "$matched" == true || "$app" == true ]] && echo "${process##*/}"
             fi
         elif [[ "$SERVICE" == frontend && ( "$executable" == node || "$executable" == nodejs ) ]]; then
             for argument in "${arguments[@]}"; do
@@ -100,7 +107,8 @@ if [[ "$ACTION" == stop ]]; then
 fi
 
 if [[ "$SERVICE" == backend ]]; then
-    [[ -x "$ROOT/backend/.venv/bin/python" ]] || { echo "Create backend/.venv and install backend/requirements.txt first." >&2; exit 1; }
+    command -v java >/dev/null || { echo "Install Java 21 first." >&2; exit 1; }
+    [[ -x "$ROOT/backend/mvnw" ]] || { echo "backend/mvnw is missing or is not executable." >&2; exit 1; }
     port=8000
 else
     command -v node >/dev/null || { echo "Install Node.js first." >&2; exit 1; }
@@ -116,7 +124,11 @@ fi
 echo "Starting $SERVICE at http://127.0.0.1:$port (Ctrl+C to stop)."
 if [[ "$SERVICE" == backend ]]; then
     cd "$ROOT/backend"
-    exec .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port "$port"
+    crypto="$ROOT/fabric/runtime/fabric-samples/test-network/organizations/peerOrganizations/org1.example.com"
+    if [[ -d "$crypto" && -z "${INSTICHAIN_FABRIC_CRYPTO_PATH:-}" ]]; then
+        export INSTICHAIN_FABRIC_CRYPTO_PATH="$crypto"
+    fi
+    exec ./mvnw spring-boot:run
 else
     cd "$ROOT/frontend"
     exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port "$port" --strictPort

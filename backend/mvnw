@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+set -eu
+
+MAVEN_VERSION=3.9.11
+BASE_URL="https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries"
+ARCHIVE="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+INSTALL_ROOT="${HOME}/.m2/wrapper/dists/apache-maven-${MAVEN_VERSION}"
+MAVEN_BIN="${INSTALL_ROOT}/apache-maven-${MAVEN_VERSION}/bin/mvn"
+
+if [ ! -x "${MAVEN_BIN}" ]; then
+    command -v curl >/dev/null 2>&1 || { echo "curl is required to install Maven." >&2; exit 1; }
+    command -v sha512sum >/dev/null 2>&1 || { echo "sha512sum is required to verify Maven." >&2; exit 1; }
+    mkdir -p "${INSTALL_ROOT}"
+    work="$(mktemp -d)"
+    trap 'rm -rf "${work}"' EXIT INT TERM
+    curl --fail --location --silent --show-error "${BASE_URL}/${ARCHIVE}" -o "${work}/${ARCHIVE}"
+    curl --fail --location --silent --show-error "${BASE_URL}/${ARCHIVE}.sha512" -o "${work}/${ARCHIVE}.sha512"
+    expected="$(tr -d '[:space:]' < "${work}/${ARCHIVE}.sha512")"
+    actual="$(sha512sum "${work}/${ARCHIVE}" | awk '{print $1}')"
+    [ "${expected}" = "${actual}" ] || { echo "Maven download checksum failed." >&2; exit 1; }
+    tar -xzf "${work}/${ARCHIVE}" -C "${INSTALL_ROOT}"
+fi
+
+exec "${MAVEN_BIN}" "$@"

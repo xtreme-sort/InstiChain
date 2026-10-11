@@ -32,19 +32,36 @@ case "$ACTION" in
     up)
         require_docker
         [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
-        [[ -f "$ROOT/fabric/chaincode/package-lock.json" ]] || { echo "Run npm install in fabric/chaincode first." >&2; exit 1; }
+        [[ -x "$ROOT/fabric/chaincode/gradlew" ]] || { echo "The Java chaincode Gradle wrapper is missing." >&2; exit 1; }
         if [[ "$(docker inspect --format '{{.State.Running}}' peer0.org1.example.com 2>/dev/null || true)" == true &&
               "$(docker inspect --format '{{.State.Running}}' peer0.org2.example.com 2>/dev/null || true)" == true &&
               "$(docker inspect --format '{{.State.Running}}' orderer.example.com 2>/dev/null || true)" == true ]]; then
             echo "Fabric network is already running; the existing ledger was preserved."
+            echo "If it still runs JavaScript chaincode, run 'make fabric-upgrade' once."
             exit 0
         fi
         cd "$NETWORK"
+        if [[ -f "$NETWORK/channel-artifacts/instichain.block" ]]; then
+            ./network.sh up -ca
+            echo "Existing Fabric network was resumed; its ledger was preserved."
+            echo "Run 'make fabric-upgrade' once to replace JavaScript chaincode with Java."
+            exit 0
+        fi
         ./network.sh up createChannel -ca -c instichain
         ./network.sh deployCC -c instichain -ccn instichain \
-            -ccp "$ROOT/fabric/chaincode" -ccl javascript \
+            -ccp "$ROOT/fabric/chaincode" -ccl java \
             -ccep "AND('Org1MSP.peer','Org2MSP.peer')"
-        echo "Fabric network is ready. Start the bridge with 'make fabric-gateway'."
+        echo "Fabric network and Java chaincode are ready."
+        ;;
+    upgrade)
+        require_docker
+        [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
+        [[ -x "$ROOT/fabric/chaincode/gradlew" ]] || { echo "The Java chaincode Gradle wrapper is missing." >&2; exit 1; }
+        cd "$NETWORK"
+        ./network.sh deployCC -c instichain -ccn instichain \
+            -ccp "$ROOT/fabric/chaincode" -ccl java -ccv 2.0 -ccs 2 \
+            -ccep "AND('Org1MSP.peer','Org2MSP.peer')"
+        echo "The instichain definition now runs Java chaincode; ledger state was preserved."
         ;;
     down)
         require_docker
@@ -52,19 +69,8 @@ case "$ACTION" in
         cd "$NETWORK"
         ./network.sh down
         ;;
-    gateway)
-        [[ -f "$ROOT/fabric/.env" ]] || { echo "Copy fabric/.env.example to fabric/.env and set a random token." >&2; exit 1; }
-        [[ -d "$ROOT/fabric/gateway/node_modules" ]] || { echo "Run npm install in fabric/gateway first." >&2; exit 1; }
-        [[ -d "$NETWORK/organizations/peerOrganizations/org1.example.com" ]] || { echo "Run 'make fabric-up' first." >&2; exit 1; }
-        set -a
-        source "$ROOT/fabric/.env"
-        set +a
-        export FABRIC_CRYPTO_PATH="$NETWORK/organizations/peerOrganizations/org1.example.com"
-        cd "$ROOT/fabric/gateway"
-        exec npm start
-        ;;
     *)
-        echo "Usage: bash scripts/fabric.sh {install|up|down|gateway}" >&2
+        echo "Usage: bash scripts/fabric.sh {install|up|upgrade|down}" >&2
         exit 2
         ;;
 esac

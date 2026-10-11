@@ -1,90 +1,58 @@
-# Hyperledger Fabric development network
+# Hyperledger Fabric Development Network
 
-InstiChain uses Hyperledger Fabric as its authoritative append-only ledger. The
-FastAPI service remains the web/API layer, and PostgreSQL remains the store for
-accounts, sessions and query projections. New administrator events are committed
-to Fabric before their PostgreSQL projections are committed.
+InstiChain uses the official Fabric two-organization test network. `Org1MSP`
+represents the institute and submits transactions. `Org2MSP` represents an
+auditor. The endorsement policy requires both peers for every write, so either
+organization can independently retain and verify the ordered ledger.
 
-The local network is Fabric's official two-organization test network:
+The Spring Boot API uses the Java Fabric Gateway client directly. There is no
+separate Node gateway service.
 
-- `Org1MSP` represents the institute and is the only organization allowed by the
-  smart contract to originate InstiChain events.
-- `Org2MSP` represents an independent auditor. The chaincode policy requires an
-  endorsement from both organizations for every write.
-- Both peers keep independently verifiable copies of the channel ledger. The
-  ordering service establishes a common transaction order.
+## Fresh setup
 
-This topology demonstrates distributed validation, but the generated identities
-and single local machine are for development only. A production deployment must
-place the organizations' peers, CAs, keys and administrators under genuinely
-separate control.
-
-## One-time setup
-
-Docker must be running and usable by your current user. From the repository root:
+From the repository root:
 
 ```bash
-cd fabric/chaincode && npm install
-cd ../gateway && npm install
-cd ../..
+make docker
 make fabric-install
-cp fabric/.env.example fabric/.env
-cp backend/.env.example backend/.env  # only when backend/.env does not exist
+make fabric-up
 ```
 
-Generate a bridge token:
+`make fabric-up` creates channel `instichain` and deploys the Java contract in
+`fabric/chaincode` with policy `AND('Org1MSP.peer','Org2MSP.peer')`.
 
-```bash
-openssl rand -hex 32
-```
+## Upgrade an existing development ledger
 
-Put that value in `FABRIC_BRIDGE_TOKEN` in `fabric/.env` and in
-`INSTICHAIN_FABRIC_BRIDGE_TOKEN` in `backend/.env`. These files are ignored by
-Git. Then apply the database migration:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m alembic upgrade head
-cd ..
-```
-
-## Start
-
-Run these in separate terminals:
+If the network already has the former JavaScript chaincode at sequence 1, keep
+the ledger. Start or resume it, then execute the upgrade once:
 
 ```bash
 make fabric-up
-make fabric-gateway
-make backend
-make frontend
+make fabric-upgrade
 ```
 
-The first command creates the `instichain` channel and deploys the JavaScript
-chaincode with policy `AND('Org1MSP.peer','Org2MSP.peer')`. When that network is
-already running, the command leaves it untouched so its ledger is preserved. The
-gateway bridge is bound to `127.0.0.1:3001` and accepts only the shared bearer
-token.
+This commits version 2, sequence 2 of the same chaincode definition. Its keys and
+transaction names are compatible, so existing events remain readable. Do not run
+the upgrade twice. A fresh network needs only `make fabric-up`.
 
-Check the live ledger through FastAPI:
+## Inspect the ledger
+
+With Fabric and the backend running:
 
 ```bash
 curl http://127.0.0.1:8000/api/ledger/health
-curl http://127.0.0.1:8000/api/ledger/events
-curl http://127.0.0.1:8000/api/ledger/revocations
+curl 'http://127.0.0.1:8000/api/ledger/events?start_sequence=1&limit=50'
 curl http://127.0.0.1:8000/api/ledger/fabric-revocations
 ```
 
-Create a club or appoint an advisor from the UI, then repeat the events request.
-Each result includes Fabric's transaction ID, submitting MSP and commit time.
+`make backend` discovers the test network's Org1 certificate, private key, and
+TLS certificate. For another deployment, configure the `INSTICHAIN_FABRIC_*`
+variables described in `backend/.env.example`.
 
-Revoke that advisor from the UI and repeat the last two requests. The chaincode
-keeps a `revocation:` index per subject, so `fabric-revocations` reads on-chain
-state directly while `revocations` serves the PostgreSQL projection; the two
-should agree. The contract rejects a revocation whose subject has no granting
-event or is already revoked.
+`make fabric-down` deletes the disposable local network, identities, and ledger.
+Do not use it to merely pause work. Leaving Docker and the Fabric containers
+running is fine for local development.
 
-`make fabric-down` permanently removes the disposable Fabric network, its
-identities and its ledger. A later `make fabric-up` creates an empty blockchain,
-so do not run `make fabric-down` when the development ledger contains data you
-need. Stop Docker itself when you merely want to pause the network.
+The test network runs both organizations on one machine for demonstration. A
+production deployment must put their peers, CAs, keys, and administrators under
+separate organizational control.
