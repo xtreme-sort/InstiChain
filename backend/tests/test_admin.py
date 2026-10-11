@@ -24,7 +24,11 @@ from app.bootstrap import bootstrap_admin
 from app.config import Settings
 from app.database import get_session
 from app.main import app
-from app.models import Administrator, Appointment, AuthorityKey, Club, FabricTransaction, User
+from app.models import (
+    Administrator, Appointment, AuthorityKey, Club, Competition, Credential,
+    FabricTransaction, ResultRecipient, ResultSubmission, User,
+)
+from app.permissions import active_appointments, permission_settings
 from app.session import SESSION_COOKIE, create_session
 
 
@@ -97,6 +101,7 @@ class AdminTests(unittest.TestCase):
 
         app.dependency_overrides[get_session] = sessions
         app.dependency_overrides[admin_settings] = lambda: self.settings
+        app.dependency_overrides[permission_settings] = lambda: self.settings
         self.addCleanup(app.dependency_overrides.clear)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
@@ -123,11 +128,101 @@ class AdminTests(unittest.TestCase):
         return response.json()["id"]
 
     def advisor_body(self, **overrides):
+        self.advisor_private_key = Ed25519PrivateKey.generate()
         return dict(email="advisor@iitm.ac.in", public_key=base64.b64encode(
-            Ed25519PrivateKey.generate().public_key().public_bytes_raw()).decode(),
+            self.advisor_private_key.public_key().public_bytes_raw()).decode(),
             verification_reference="Faculty directory confirmation 002",
             starts_at=(self.now - timedelta(minutes=1)).isoformat(),
             ends_at=(self.now + timedelta(days=365)).isoformat()) | overrides
+
+    def appoint_advisor(self, club, **overrides):
+        response = self.client.post(
+            f"/api/admin/clubs/{club}/advisors",
+            json=self.advisor_body(**overrides),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()["id"]
+
+    def prepare_role(self, club, **overrides):
+        body = dict(
+            email="student@iitm.ac.in",
+            position="club_head",
+            starts_at=(self.now - timedelta(minutes=1)).isoformat(),
+            ends_at=(self.now + timedelta(days=180)).isoformat(),
+        ) | overrides
+        response = self.client.post(f"/api/advisor/clubs/{club}/role-grants/prepare", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return prepared
+
+    def submit_role(self, club, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(f"/api/advisor/clubs/{club}/role-grants", json={
+            "document": prepared["document"],
+            "signature": base64.b64encode(signature).decode(),
+        })
+
+    def prepare_revocation(self, club, appointment, reason="Annual club handover"):
+        response = self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{appointment}/revocations/prepare",
+            json={"reason": reason},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return prepared
+
+    def submit_revocation(self, club, appointment, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{appointment}/revocations",
+            json={
+                "document": prepared["document"],
+                "signature": base64.b64encode(signature).decode(),
+            },
+        )
+
+    def competition_body(self, **overrides):
+        return dict(
+            title="Inter-IIT Programming Contest",
+            description="Annual team programming competition",
+            starts_at=(self.now + timedelta(days=30)).isoformat(),
+            ends_at=(self.now + timedelta(days=31)).isoformat(),
+        ) | overrides
+
+    def create_competition(self, club, **overrides):
+        response = self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(**overrides),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def result_body(self, **overrides):
+        return dict(
+            award="First place",
+            proof_digest="a" * 64,
+            recipient_emails=["student@iitm.ac.in", "admin@iitm.ac.in"],
+        ) | overrides
+
+    def prepare_issuance(self, club, competition, result_id, version):
+        path = (
+            f"/api/clubs/{club}/competitions/{competition}/results/"
+            f"{result_id}/versions/{version}/issuance"
+        )
+        response = self.client.post(f"{path}/prepare")
+        self.assertEqual(response.status_code, 200, response.text)
+        prepared = response.json()
+        self.assertEqual(base64.b64decode(prepared["signing_payload"]), rfc8785.dumps(prepared["document"]))
+        return path, prepared
+
+    def submit_issuance(self, path, prepared, signature=None):
+        signature = signature or self.advisor_private_key.sign(base64.b64decode(prepared["signing_payload"]))
+        return self.client.post(path, json={
+            "document": prepared["document"],
+            "signature": base64.b64encode(signature).decode(),
+        })
 
     def test_bootstrap_verified_only_and_idempotent(self):
         with self.assertRaises(ValueError):
@@ -192,6 +287,521 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/admin/clubs").json()[0]["advisors"][0]["status"], "active")
         self.login("advisor")
         self.assertEqual(self.client.get("/api/admin/access").status_code, 403)
+
+    def test_advisor_access_is_limited_to_assigned_clubs(self):
+        self.bootstrap()
+        assigned_club = self.club()
+        other_club = self.club("robotics")
+        appointment = self.appoint_advisor(assigned_club)
+        self.login("advisor")
+
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 200)
+        response = self.client.get("/api/advisor/clubs")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["id"], assigned_club)
+        self.assertEqual(response.json()[0]["slug"], "coding")
+        self.assertEqual(response.json()[0]["name"], "Coding")
+        self.assertEqual(response.json()[0]["appointment_id"], appointment)
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{assigned_club}/access").status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{other_club}/access").status_code,
+            403,
+        )
+
+    def test_advisor_routes_reject_anonymous_and_ordinary_users(self):
+        self.client.cookies.clear()
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 401)
+        self.login("student")
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+        self.assertEqual(self.client.get("/api/advisor/clubs").status_code, 403)
+
+    def test_scheduled_expired_and_revoked_advisors_are_denied(self):
+        self.bootstrap()
+        club = self.club()
+        appointment_id = self.appoint_advisor(club)
+        self.login("advisor")
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now + timedelta(days=1)
+            appointment.ends_at = self.now + timedelta(days=2)
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now - timedelta(days=2)
+            appointment.ends_at = self.now - timedelta(days=1)
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, appointment_id)
+            appointment.starts_at = self.now - timedelta(days=1)
+            appointment.ends_at = self.now + timedelta(days=1)
+            appointment.revoked_at = db.scalar(select(func.clock_timestamp()))
+            appointment.revocation_transaction_id = appointment.grant_transaction_id
+        self.assertEqual(self.client.get("/api/advisor/access").status_code, 403)
+
+    def test_advisor_grants_signed_club_head_role_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        prepared = self.prepare_role(club)
+        response = self.submit_role(club, prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["position"], "club_head")
+        self.assertEqual(response.json()["user_id"], str(self.users["student"]))
+        self.assertEqual(self.submit_role(club, prepared).json(), response.json())
+
+        with Session(self.engine) as db:
+            appointment = db.get(Appointment, response.json()["id"])
+            event = db.get(FabricTransaction, appointment.grant_transaction_id)
+            key = db.get(AuthorityKey, appointment.advisor_key_id)
+            self.assertEqual(appointment.granted_by_id, self.users["advisor"])
+            self.assertEqual(event.event_type, "ROLE_GRANTED")
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+    def test_role_grants_enforce_scope_origin_recipient_and_signature(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        invalid_role = self.client.post(f"/api/advisor/clubs/{club}/role-grants/prepare", json={
+            "email": "student@iitm.ac.in",
+            "position": "faculty_advisor",
+            "starts_at": self.now.isoformat(),
+            "ends_at": (self.now + timedelta(days=1)).isoformat(),
+        })
+        self.assertEqual(invalid_role.status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{club}/role-grants/prepare",
+            json={
+                "email": "unverified@iitm.ac.in", "position": "club_head",
+                "starts_at": self.now.isoformat(),
+                "ends_at": (self.now + timedelta(days=1)).isoformat(),
+            },
+        ).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{other_club}/role-grants/prepare",
+            json={
+                "email": "student@iitm.ac.in", "position": "club_head",
+                "starts_at": self.now.isoformat(),
+                "ends_at": (self.now + timedelta(days=1)).isoformat(),
+            },
+        ).status_code, 403)
+
+        prepared = self.prepare_role(club)
+        self.assertEqual(self.submit_role(club, prepared, bytes(64)).status_code, 422)
+        self.client.headers["Origin"] = "https://attacker.example"
+        self.assertEqual(self.submit_role(club, prepared).status_code, 403)
+
+    def test_role_grant_overlap_and_fabric_failure_leave_no_partial_role(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+
+        first = self.prepare_role(club)
+        self.assertEqual(self.submit_role(club, first).status_code, 201)
+        overlapping = self.prepare_role(club, email="admin@iitm.ac.in")
+        self.assertEqual(self.submit_role(club, overlapping).status_code, 409)
+
+        office_bearer = self.prepare_role(club, position="office_bearer")
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(self.submit_role(club, office_bearer).status_code, 503)
+        with Session(self.engine) as db:
+            roles = db.scalars(select(Appointment).where(
+                Appointment.position.in_(("club_head", "office_bearer")),
+            )).all()
+            self.assertEqual(len(roles), 1)
+
+    def test_advisor_revokes_signed_role_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+
+        roles = self.client.get(f"/api/advisor/clubs/{club}/roles")
+        self.assertEqual(roles.status_code, 200, roles.text)
+        self.assertEqual(roles.json()[0]["status"], "active")
+        prepared = self.prepare_revocation(club, granted["id"])
+        response = self.submit_revocation(club, granted["id"], prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).json(), response.json())
+        self.assertEqual(
+            self.client.get(f"/api/advisor/clubs/{club}/roles").json()[0]["status"],
+            "revoked",
+        )
+
+        with Session(self.engine) as db:
+            appointment = db.get(Appointment, granted["id"])
+            event = db.get(FabricTransaction, appointment.revocation_transaction_id)
+            key = db.get(AuthorityKey, appointment.advisor_key_id)
+            self.assertIsNotNone(appointment.revoked_at)
+            self.assertEqual(active_appointments(
+                db, self.users["student"], ("club_head",), appointment.club_id,
+            ), ())
+            self.assertEqual(event.event_type, "ROLE_REVOKED")
+            self.assertEqual(event.payload["reason"], "Annual club handover")
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+        successor = self.submit_role(
+            club,
+            self.prepare_role(club, email="admin@iitm.ac.in"),
+        )
+        self.assertEqual(successor.status_code, 201, successor.text)
+
+    def test_role_revocation_rejects_wrong_scope_target_and_signature(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        advisor_appointment = self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{other_club}/roles/{granted['id']}/revocations/prepare",
+            json={"reason": "Wrong club"},
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{advisor_appointment}/revocations/prepare",
+            json={"reason": "Not permitted"},
+        ).status_code, 404)
+        prepared = self.prepare_revocation(club, granted["id"])
+        self.assertEqual(
+            self.submit_revocation(club, granted["id"], prepared, bytes(64)).status_code,
+            422,
+        )
+        prepared["document"]["payload"]["reason"] = "Tampered reason"
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).status_code, 422)
+
+    def test_role_revocation_rejects_expired_role_and_rolls_back_fabric_failure(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+        prepared = self.prepare_revocation(club, granted["id"])
+
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(
+                self.submit_revocation(club, granted["id"], prepared).status_code,
+                503,
+            )
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(Appointment, granted["id"]).revoked_at)
+
+        with Session(self.engine) as db, db.begin():
+            appointment = db.get(Appointment, granted["id"])
+            appointment.starts_at = self.now - timedelta(days=2)
+            appointment.ends_at = self.now - timedelta(days=1)
+        response = self.client.post(
+            f"/api/advisor/clubs/{club}/roles/{granted['id']}/revocations/prepare",
+            json={"reason": "Too late"},
+        )
+        self.assertEqual(response.status_code, 409)
+
+    def test_club_head_creates_and_advisor_views_competitions(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.login("student")
+
+        response = self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        competition = response.json()
+        self.assertEqual(competition["club_id"], club)
+        self.assertEqual(competition["created_by_id"], str(self.users["student"]))
+        self.assertEqual(competition["created_by_name"], "student")
+        self.assertEqual(
+            self.client.get(f"/api/clubs/{club}/competitions/{competition['id']}").json(),
+            competition,
+        )
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").json(), [competition])
+
+        self.login("advisor")
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").json(), [competition])
+        with Session(self.engine) as db:
+            stored = db.get(Competition, competition["id"])
+            self.assertEqual(stored.created_by_id, self.users["student"])
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 4)
+            self.assertEqual(db.get(Appointment, role["id"]).position, "club_head")
+
+    def test_office_bearer_can_create_competition(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(
+            club,
+            self.prepare_role(club, position="office_bearer"),
+        ).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(title="Robotics Challenge"),
+        ).status_code, 201)
+
+    def test_competitions_enforce_role_scope_revocation_and_input_ownership(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{other_club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(ends_at=self.now.isoformat()),
+        ).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(created_by_id=str(self.users["admin"])),
+        ).status_code, 422)
+
+        self.login("advisor")
+        prepared = self.prepare_revocation(club, role["id"])
+        self.assertEqual(self.submit_revocation(club, role["id"], prepared).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{club}/competitions",
+            json=self.competition_body(),
+        ).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/clubs/{club}/competitions").status_code, 403)
+
+    def test_club_head_submits_immutable_team_result_versions(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+
+        first = self.client.post(path, json=self.result_body())
+        self.assertEqual(first.status_code, 201, first.text)
+        first = first.json()
+        self.assertEqual(first["version"], 1)
+        self.assertEqual(len(first["recipients"]), 2)
+        second = self.client.post(
+            f"{path}/{first['result_id']}/versions",
+            json=self.result_body(
+                award="Winners",
+                proof_digest="b" * 64,
+                recipient_emails=["student@iitm.ac.in"],
+            ),
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertEqual(second.json()["version"], 2)
+        self.assertEqual(second.json()["result_id"], first["result_id"])
+        self.assertEqual(
+            self.client.get(f"{path}/{first['result_id']}/versions/1").json(),
+            first,
+        )
+        self.assertEqual(len(self.client.get(path).json()), 2)
+
+        self.login("advisor")
+        self.assertEqual(len(self.client.get(path).json()), 2)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultSubmission)), 2)
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultRecipient)), 3)
+            self.assertEqual(db.scalar(select(func.count()).select_from(FabricTransaction)), 4)
+
+    def test_result_submission_validates_recipients_digest_and_club_scope(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+
+        for body in [
+            self.result_body(proof_digest="invalid"),
+            self.result_body(recipient_emails=[]),
+            self.result_body(recipient_emails=["student@iitm.ac.in", "student@iitm.ac.in"]),
+            self.result_body(recipient_emails=["unverified@iitm.ac.in"]),
+            self.result_body(version=7),
+        ]:
+            with self.subTest(body=body):
+                self.assertEqual(self.client.post(path, json=body).status_code, 422)
+        self.assertEqual(self.client.post(
+            f"/api/clubs/{other_club}/competitions/{competition['id']}/results",
+            json=self.result_body(),
+        ).status_code, 403)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(ResultSubmission)), 0)
+
+    def test_revoked_officer_cannot_submit_new_result_version(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        role = self.submit_role(club, self.prepare_role(club)).json()
+        self.login("student")
+        competition = self.create_competition(club)
+        path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        first = self.client.post(path, json=self.result_body()).json()
+
+        self.login("advisor")
+        prepared = self.prepare_revocation(club, role["id"])
+        self.assertEqual(self.submit_revocation(club, role["id"], prepared).status_code, 201)
+        self.login("student")
+        self.assertEqual(self.client.post(
+            f"{path}/{first['result_id']}/versions",
+            json=self.result_body(proof_digest="b" * 64),
+        ).status_code, 403)
+
+    def test_advisor_issues_team_credentials_on_fabric_idempotently(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        submission = self.client.post(result_path, json=self.result_body()).json()
+        self.assertEqual(self.client.post(
+            f"{result_path}/{submission['result_id']}/versions/1/issuance/prepare",
+        ).status_code, 403)
+
+        self.login("advisor")
+        path, prepared = self.prepare_issuance(
+            club, competition["id"], submission["result_id"], 1,
+        )
+        response = self.submit_issuance(path, prepared)
+        self.assertEqual(response.status_code, 201, response.text)
+        issued = response.json()
+        self.assertEqual(len(issued["credentials"]), 2)
+        self.assertEqual(self.submit_issuance(path, prepared).json(), issued)
+
+        with Session(self.engine) as db:
+            credentials = db.scalars(select(Credential).order_by(Credential.recipient_id)).all()
+            self.assertEqual(len(credentials), 2)
+            self.assertEqual(len({item.issuance_transaction_id for item in credentials}), 1)
+            event = db.get(FabricTransaction, credentials[0].issuance_transaction_id)
+            key = db.get(AuthorityKey, event.actor_key_id)
+            self.assertEqual(event.event_type, "ACHIEVEMENT_ISSUED")
+            self.assertEqual(len(event.payload["claims"]), 2)
+            Ed25519PublicKey.from_public_bytes(key.public_key).verify(
+                event.signature,
+                rfc8785.dumps(action_document(
+                    event.request_id, event.event_type, event.object_ids,
+                    event.payload, event.actor_id, event.actor_key_id,
+                )),
+            )
+
+    def test_credential_issuance_rejects_tampering_and_rolls_back_fabric_failure(self):
+        self.bootstrap()
+        club = self.club()
+        other_club = self.club("robotics")
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        submission = self.client.post(result_path, json=self.result_body()).json()
+        self.login("advisor")
+        path, prepared = self.prepare_issuance(
+            club, competition["id"], submission["result_id"], 1,
+        )
+
+        self.assertEqual(self.submit_issuance(path, prepared, bytes(64)).status_code, 422)
+        tampered = prepared["document"] | {
+            "payload": prepared["document"]["payload"] | {"award": "Tampered"},
+        }
+        signature = self.advisor_private_key.sign(rfc8785.dumps(tampered))
+        self.assertEqual(self.client.post(path, json={
+            "document": tampered,
+            "signature": base64.b64encode(signature).decode(),
+        }).status_code, 422)
+        self.assertEqual(self.client.post(
+            path.replace(f"clubs/{club}", f"clubs/{other_club}"),
+            json={
+                "document": prepared["document"],
+                "signature": base64.b64encode(signature).decode(),
+            },
+        ).status_code, 403)
+        with patch.object(FabricClient, "submit", side_effect=FabricUnavailable("offline")):
+            self.assertEqual(self.submit_issuance(path, prepared).status_code, 503)
+        with Session(self.engine) as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(Credential)), 0)
+
+    def test_corrected_result_credentials_supersede_previous_version(self):
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        self.assertEqual(self.submit_role(club, self.prepare_role(club)).status_code, 201)
+        self.login("student")
+        competition = self.create_competition(club)
+        result_path = f"/api/clubs/{club}/competitions/{competition['id']}/results"
+        first = self.client.post(result_path, json=self.result_body()).json()
+        self.login("advisor")
+        first_path, first_prepared = self.prepare_issuance(
+            club, competition["id"], first["result_id"], 1,
+        )
+        first_issued = self.submit_issuance(first_path, first_prepared).json()
+
+        self.login("student")
+        second = self.client.post(
+            f"{result_path}/{first['result_id']}/versions",
+            json=self.result_body(award="Corrected winners", proof_digest="b" * 64),
+        ).json()
+        self.login("advisor")
+        second_path, second_prepared = self.prepare_issuance(
+            club, competition["id"], second["result_id"], 2,
+        )
+        second_issued = self.submit_issuance(second_path, second_prepared)
+        self.assertEqual(second_issued.status_code, 201, second_issued.text)
+        previous_ids = {item["id"] for item in first_issued["credentials"]}
+        self.assertEqual(
+            {item["supersedes_id"] for item in second_issued.json()["credentials"]},
+            previous_ids,
+        )
+        self.assertEqual(
+            set(second_prepared["document"]["payload"]["superseded_credential_ids"]),
+            previous_ids,
+        )
 
     def test_invalid_advisor_inputs_do_not_write(self):
         self.bootstrap()

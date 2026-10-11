@@ -6,7 +6,7 @@ from sqlalchemy import (
     LargeBinary, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -199,6 +199,7 @@ class Appointment(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    club: Mapped[Club] = relationship()
 
 
 class Competition(Base):
@@ -216,6 +217,42 @@ class Competition(Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CompetitionResult(Base):
+    __tablename__ = "competition_results"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    competition_id: Mapped[UUID] = mapped_column(ForeignKey("competitions.id"), index=True)
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResultSubmission(Base):
+    __tablename__ = "result_submissions"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="positive_version"),
+        CheckConstraint("length(trim(award)) > 0", name="nonempty_award"),
+        CheckConstraint("proof_digest ~ '^[0-9a-f]{64}$'", name="proof_digest_format"),
+        UniqueConstraint("result_id", "version", name="uq_result_submissions_result_version"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    result_id: Mapped[UUID] = mapped_column(ForeignKey("competition_results.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    award: Mapped[str] = mapped_column(String(250))
+    proof_digest: Mapped[str] = mapped_column(String(64))
+    submitted_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResultRecipient(Base):
+    __tablename__ = "result_recipients"
+
+    submission_id: Mapped[UUID] = mapped_column(
+        ForeignKey("result_submissions.id"), primary_key=True,
+    )
+    recipient_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True, index=True)
 
 
 class Credential(Base):
@@ -243,7 +280,9 @@ class Credential(Base):
     result_id: Mapped[UUID]
     submission_version: Mapped[int] = mapped_column(Integer)
     proof_digest: Mapped[str] = mapped_column(String(64))
-    issuance_transaction_id: Mapped[UUID] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
+    issuance_transaction_id: Mapped[UUID] = mapped_column(
+        ForeignKey("fabric_transactions.request_id"), index=True,
+    )
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revocation_transaction_id: Mapped[UUID | None] = mapped_column(ForeignKey("fabric_transactions.request_id"), unique=True)
