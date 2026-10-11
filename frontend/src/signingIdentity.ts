@@ -52,6 +52,13 @@ function encodeBase64(bytes: Uint8Array): string {
   return window.btoa(String.fromCharCode(...bytes))
 }
 
+function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
+  const decoded = window.atob(value)
+  const bytes = new Uint8Array(decoded.length)
+  for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index)
+  return bytes
+}
+
 export async function generateSigningIdentity(): Promise<GeneratedIdentity> {
   if (!window.isSecureContext || !window.crypto?.subtle || !window.indexedDB) {
     throw new Error('Signing-key creation requires a secure browser context with IndexedDB support.')
@@ -120,4 +127,17 @@ export function loadOrProvisionSigningIdentity(userId: string): Promise<SigningI
   const request = provision(userId).finally(() => provisioning.delete(userId))
   provisioning.set(userId, request)
   return request
+}
+
+export async function signPreparedPayload(userId: string, payload: string): Promise<string> {
+  const identity = await loadSigningIdentity(userId)
+  if (!identity?.privateKey) {
+    throw new Error('Your signing private key is unavailable on this device.')
+  }
+  const signature = await window.crypto.subtle.sign(
+    { name: 'Ed25519' },
+    identity.privateKey,
+    decodeBase64(payload),
+  )
+  return encodeBase64(new Uint8Array(signature))
 }

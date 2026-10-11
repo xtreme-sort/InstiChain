@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link2, RefreshCw } from 'lucide-react'
 import EmailVerification from './EmailVerification'
 import AdminPanel from './AdminPanel'
+import AdvisorPanel from './AdvisorPanel'
 import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
@@ -76,6 +77,7 @@ export default function App() {
             onLinkModeChange={setLinkMode} />
         )}
         {account && !linkMode && <AdminPanel key={account.id} />}
+        {account && !linkMode && <AdvisorPanel key={`advisor-${account.id}`} userId={account.id} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>
