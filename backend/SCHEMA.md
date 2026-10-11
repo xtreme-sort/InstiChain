@@ -59,8 +59,15 @@ ledger. Key rotation/recovery workflows, checkpoints, storage references and
 share permissions remain future modules.
 
 Appointments and credentials are current-state projection tables. Their mutable
-revocation/replacement fields will be maintained from immutable ledger events.
+revocation/replacement fields are maintained from immutable ledger events:
+appointment revocation sets `revoked_at` and `revocation_transaction_id` together,
+only after Fabric confirms a `ROLE_REVOKED` event, which the club's faculty
+advisor signs. Credential revocation uses the same column pair and is already
+validated and indexed by the chaincode, but has no write endpoint yet.
 Ending an appointment does not delete credentials or automatically revoke them.
+`authority_keys` and `administrator` carry `revoked_at` without a transaction
+reference, so key revocation cannot yet be bound to a Fabric receipt; that needs
+a migration adding `revocation_transaction_id` to both tables.
 The eventual application database role must be separate from the migration owner.
 Fabric peer, CA and orderer identities must be held by their respective operators,
 not by one shared production administrator.
@@ -68,3 +75,8 @@ not by one shared production administrator.
 The Compose credentials and Fabric test-network identities are for local development
 only. `/api/health` reports API liveness; `/api/ledger/health` verifies a live
 Fabric query through the Gateway bridge.
+
+The revocation list reads these projection columns. `/api/ledger/revocations` and
+`/api/ledger/revocations/{subject_type}/{subject_id}` are unauthenticated, since
+an external verifier has no institute account, and both return `checked_at`: an
+absent entry means "not revoked at that time", never a proof of validity.

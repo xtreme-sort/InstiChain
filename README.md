@@ -269,9 +269,35 @@ limits; expired older rows can be removed by a future retention job.
 ## Administrator Setup
 
 Administrator bootstrap, club creation and advisor onboarding are available after
-migration `0004`. Follow [administrator and integration setup](backend/ADMIN_SETUP.md)
+migration `0004`. Follow
+[administrator and integration setup](backend/ADMIN_SETUP.md)
 for the controlled bootstrap command, signing-key preparation, institutional
 verification, SMTP delivery checks and read-only Google Drive access probe.
+
+## Verification and the Revocation List
+
+An external verifier needs no institute account. These read-only endpoints report
+current revocation state:
+
+- `GET /api/ledger/revocations` lists revoked appointments and credentials, newest
+  first. `subject=appointment` or `subject=credential` filters it; `limit` and
+  `offset` page it.
+- `GET /api/ledger/revocations/{subject_type}/{subject_id}` answers for one
+  subject, returning `revoked`, `revoked_at` and the revocation transaction.
+- `GET /api/ledger/fabric-revocations` returns Fabric's own revocation index so
+  the PostgreSQL projection can be audited against the ledger.
+
+Every response carries `checked_at`. An absent entry means "not revoked as of that
+time", which is not a proof of validity: a signature check alone cannot establish
+that no later revocation exists, so a verifier that cannot reach these endpoints
+must report status unknown rather than valid.
+
+Revocations are written by the faculty advisor who holds authority over the club,
+through the advisor-signed endpoints under `/api/advisor/clubs/{club_id}/roles/`.
+The reason is stored on Fabric, so record an institutional justification rather
+than personal details. Credential revocation events are already validated and
+indexed by the chaincode but have no write endpoint until credential revocation
+is built on top of issuance.
 
 No account is promoted by signup. Private keys stay outside Git. Real SMTP inbox
 delivery and Drive test-account access require your own provider configuration.

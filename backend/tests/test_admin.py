@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import rfc8785
 from alembic import command
@@ -55,6 +55,15 @@ class AdminTests(unittest.TestCase):
         self.key_path.write_bytes(self.private_key.private_bytes(serialization.Encoding.PEM,
                                   serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         self.key_path.chmod(0o600)
+        if os.name == "nt":
+            # Windows reports POSIX-irrelevant mode bits, so the owner-only check
+            # in load_signing_key cannot pass here. The check itself is tested on
+            # its own in test_preflight.
+            permissive = patch("app.authority.Path.stat", autospec=True,
+                               side_effect=lambda self, **kwargs: os.stat_result(
+                                   (0o100600,) + tuple(os.stat(self))[1:]))
+            permissive.start()
+            self.addCleanup(permissive.stop)
         self.settings = Settings(_env_file=None, admin_signing_key_file=self.key_path,
                                  fabric_bridge_token="test-bridge-token")
         self.fabric_sequence = 0
@@ -832,6 +841,61 @@ class AdminTests(unittest.TestCase):
                 self.client.post("/api/admin/clubs", json={"name": "X", "slug": "x"})
         with Session(self.engine) as db:
             self.assertEqual(db.scalar(select(func.count()).select_from(Club)), 0)
+
+    def test_revocation_list_reports_revoked_roles_for_verifiers(self):
+        """The list is the only way a verifier can establish current status."""
+        self.bootstrap()
+        club = self.club()
+        self.appoint_advisor(club)
+        self.login("advisor")
+        granted = self.submit_role(club, self.prepare_role(club)).json()
+
+        # An unrevoked role is absent from the list and reports revoked: false.
+        empty = self.client.get("/api/ledger/revocations").json()
+        self.assertEqual((empty["total"], empty["revocations"]), (0, []))
+        before = self.client.get(f"/api/ledger/revocations/appointment/{granted['id']}").json()
+        self.assertFalse(before["revoked"])
+        self.assertIsNone(before["revoked_at"])
+        self.assertIsNotNone(before["checked_at"])
+
+        prepared = self.prepare_revocation(club, granted["id"])
+        self.assertEqual(self.submit_revocation(club, granted["id"], prepared).status_code, 201)
+
+        listed = self.client.get("/api/ledger/revocations").json()
+        self.assertEqual(listed["total"], 1)
+        entry = listed["revocations"][0]
+        self.assertEqual(entry["subject_type"], "appointment")
+        self.assertEqual(entry["subject_id"], granted["id"])
+        with Session(self.engine) as db:
+            appointment = db.get(Appointment, UUID(granted["id"]))
+            self.assertEqual(entry["revocation_transaction_id"],
+                             str(appointment.revocation_transaction_id))
+
+        status = self.client.get(f"/api/ledger/revocations/appointment/{granted['id']}").json()
+        self.assertTrue(status["revoked"])
+        self.assertEqual(status["revocation_transaction_id"], entry["revocation_transaction_id"])
+
+        # Filtering by the other subject type must not report this appointment.
+        credentials = self.client.get("/api/ledger/revocations?subject=credential").json()
+        self.assertEqual((credentials["total"], credentials["revocations"]), (0, []))
+        appointments = self.client.get("/api/ledger/revocations?subject=appointment").json()
+        self.assertEqual(appointments["total"], 1)
+
+    def test_revocation_list_is_public_paged_and_uncached(self):
+        self.bootstrap()
+        self.client.cookies.clear()
+        response = self.client.get("/api/ledger/revocations")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIsNotNone(response.json()["checked_at"])
+        paged = self.client.get("/api/ledger/revocations?limit=1&offset=0").json()
+        self.assertEqual((paged["limit"], paged["offset"]), (1, 0))
+        for path in ["/api/ledger/revocations?limit=0", "/api/ledger/revocations?subject=nonsense",
+                     f"/api/ledger/revocations/nonsense/{uuid4()}"]:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 422)
+        unknown = self.client.get(f"/api/ledger/revocations/credential/{uuid4()}").json()
+        self.assertFalse(unknown["revoked"])
 
     def test_revoked_admin_is_denied(self):
         self.bootstrap()
