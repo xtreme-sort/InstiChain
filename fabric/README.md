@@ -71,10 +71,18 @@ Check the live ledger through FastAPI:
 ```bash
 curl http://127.0.0.1:8000/api/ledger/health
 curl http://127.0.0.1:8000/api/ledger/events
+curl http://127.0.0.1:8000/api/ledger/revocations
+curl http://127.0.0.1:8000/api/ledger/fabric-revocations
 ```
 
 Create a club or appoint an advisor from the UI, then repeat the events request.
 Each result includes Fabric's transaction ID, submitting MSP and commit time.
+
+Revoke that advisor from the UI and repeat the last two requests. The chaincode
+keeps a `revocation:` index per subject, so `fabric-revocations` reads on-chain
+state directly while `revocations` serves the PostgreSQL projection; the two
+should agree. The contract rejects a revocation whose subject has no granting
+event or is already revoked.
 
 `make fabric-down` permanently removes the disposable Fabric network, its
 identities and its ledger. A later `make fabric-up` creates an empty blockchain,

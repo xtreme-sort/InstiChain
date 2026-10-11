@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.authority import FabricUnavailable, append_admin_event, load_signing_key, lock_ledger
 from app.config import Settings
@@ -85,6 +85,11 @@ class AdvisorRequest(BaseModel):
         if self.ends_at <= self.starts_at:
             raise ValueError("End time must be after start time")
         return self
+
+
+class RevocationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    reason: str = Field(min_length=1, max_length=500)
 
 
 def signer(db: Session, admin: Administrator, settings: Settings):
@@ -188,3 +193,34 @@ def appoint_advisor(club_id: UUID, body: AdvisorRequest, admin: Admin, db: Datab
     db.commit()
     return {"id": str(appointment_id), "club_id": str(club_id), "advisor_id": str(user.id),
             "key_id": str(advisor_key.id), "starts_at": starts_at, "ends_at": body.ends_at}
+
+
+@router.post("/appointments/{appointment_id}/revocation", status_code=201)
+def revoke_appointment(appointment_id: UUID, body: RevocationRequest, admin: Admin,
+                       db: Database, settings: Configuration):
+    """Record an administrator-signed early end of authority on Fabric."""
+    appointment = db.get(Appointment, appointment_id, with_for_update=True)
+    if appointment is None:
+        raise HTTPException(404, "Appointment not found.")
+    if appointment.revoked_at is not None:
+        raise HTTPException(409, "This appointment is already revoked.")
+    now = db.scalar(select(func.clock_timestamp()))
+    # An elapsed term already denies authority; revoking it would misreport history.
+    if appointment.ends_at <= now:
+        raise HTTPException(409, "This appointment has already ended.")
+    key, private_key = signer(db, admin, settings)
+    request_id = uuid5(NAMESPACE_URL, f"instichain:appointment-revocation:{appointment_id}")
+    try:
+        event = append_admin_event(db, key, private_key, settings, request_id, "ROLE_REVOKED",
+            {"club_id": str(appointment.club_id), "user_id": str(appointment.user_id),
+             "appointment_id": str(appointment_id)},
+            {"position": appointment.position, "reason": body.reason,
+             "revoked_at": now.astimezone(timezone.utc).isoformat(),
+             "grant_transaction_id": str(appointment.grant_transaction_id)})
+    except FabricUnavailable:
+        raise HTTPException(503, "The Fabric ledger is unavailable; nothing was revoked.") from None
+    appointment.revoked_at = now
+    appointment.revocation_transaction_id = event.request_id
+    db.commit()
+    return {"appointment_id": str(appointment_id), "revoked_at": now,
+            "revocation_transaction_id": str(event.request_id)}

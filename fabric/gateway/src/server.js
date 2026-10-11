@@ -79,6 +79,15 @@ const server = http.createServer(async (request, response) => {
       const head = JSON.parse(decoder.decode(await contract.evaluateTransaction('GetHead')));
       return respond(response, 200, { status: 'ok', channel: channelName, chaincode: chaincodeName, head });
     }
+    if (request.method === 'GET' && request.url === '/revocations') {
+      const revocations = JSON.parse(decoder.decode(await contract.evaluateTransaction('GetRevocations')));
+      return respond(response, 200, revocations);
+    }
+    if (request.method === 'GET' && request.url?.startsWith('/revocations/')) {
+      const id = decodeURIComponent(request.url.slice('/revocations/'.length));
+      const revocation = JSON.parse(decoder.decode(await contract.evaluateTransaction('GetRevocation', id)));
+      return respond(response, 200, revocation);
+    }
     if (request.method === 'GET' && request.url?.startsWith('/events/')) {
       const id = decodeURIComponent(request.url.slice('/events/'.length));
       const event = JSON.parse(decoder.decode(await contract.evaluateTransaction('GetEvent', id)));

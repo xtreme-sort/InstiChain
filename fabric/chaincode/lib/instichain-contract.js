@@ -4,8 +4,16 @@ const { Contract } = require('fabric-contract-api');
 
 const EVENT_PREFIX = 'event:';
 const HEAD_KEY = 'ledger:head';
+const REVOCATION_PREFIX = 'revocation:';
 const EVENT_TYPE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+// Revocation events name the subject they end authority over, so the ledger can
+// answer "is this revoked?" without replaying every entry.
+const REVOCATION_SUBJECTS = {
+  ROLE_REVOKED: 'appointment_id',
+  ACHIEVEMENT_REVOKED: 'credential_id',
+};
 
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -84,6 +92,25 @@ class InstiChainContract extends Contract {
       return JSON.stringify(existing);
     }
 
+    const subjectField = REVOCATION_SUBJECTS[request.event_type];
+    let subjectId;
+    if (subjectField) {
+      subjectId = request.object_ids[subjectField];
+      if (!UUID.test(subjectId || '')) {
+        throw new Error(`${request.event_type} requires object_ids.${subjectField} as a lowercase UUID`);
+      }
+      const revocationKey = REVOCATION_PREFIX + subjectId;
+      const revokedBytes = await ctx.stub.getState(revocationKey);
+      if (revokedBytes && revokedBytes.length > 0) {
+        throw new Error(`${subjectField} ${subjectId} is already revoked`);
+      }
+      // Authority cannot be ended before it was granted on this ledger.
+      const grantBytes = await ctx.stub.getState(EVENT_PREFIX + subjectId);
+      if (!grantBytes || grantBytes.length === 0) {
+        throw new Error(`${subjectField} ${subjectId} has no granting event to revoke`);
+      }
+    }
+
     const headBytes = await ctx.stub.getState(HEAD_KEY);
     const previous = headBytes && headBytes.length > 0 ? JSON.parse(headBytes.toString('utf8')) : null;
     const event = {
@@ -103,6 +130,17 @@ class InstiChainContract extends Contract {
     const bytes = Buffer.from(JSON.stringify(event));
     await ctx.stub.putState(key, bytes);
     await ctx.stub.putState(`sequence:${String(event.sequence).padStart(20, '0')}`, bytes);
+    if (subjectField) {
+      await ctx.stub.putState(REVOCATION_PREFIX + subjectId, Buffer.from(JSON.stringify({
+        subject_field: subjectField,
+        subject_id: subjectId,
+        event_type: event.event_type,
+        sequence: event.sequence,
+        request_id: event.request_id,
+        fabric_transaction_id: event.fabric_transaction_id,
+        revoked_at: event.committed_at,
+      })));
+    }
     await ctx.stub.putState(HEAD_KEY, Buffer.from(JSON.stringify({
       sequence: event.sequence,
       request_id: event.request_id,
@@ -122,6 +160,28 @@ class InstiChainContract extends Contract {
   async GetHead(ctx) {
     const bytes = await ctx.stub.getState(HEAD_KEY);
     return bytes && bytes.length > 0 ? bytes.toString('utf8') : JSON.stringify({ sequence: 0 });
+  }
+
+  async GetRevocation(ctx, subjectId) {
+    if (!UUID.test(subjectId)) throw new Error('subjectId must be a lowercase UUID');
+    const bytes = await ctx.stub.getState(REVOCATION_PREFIX + subjectId);
+    if (!bytes || bytes.length === 0) {
+      return JSON.stringify({ subject_id: subjectId, revoked: false });
+    }
+    return JSON.stringify({ ...JSON.parse(bytes.toString('utf8')), revoked: true });
+  }
+
+  async GetRevocations(ctx) {
+    const iterator = await ctx.stub.getStateByRange(REVOCATION_PREFIX, `${REVOCATION_PREFIX}￿`);
+    const revocations = [];
+    for (;;) {
+      const item = await iterator.next();
+      if (item.value) revocations.push(JSON.parse(item.value.value.toString('utf8')));
+      if (item.done) break;
+    }
+    await iterator.close();
+    revocations.sort((left, right) => left.sequence - right.sequence);
+    return JSON.stringify(revocations);
   }
 
   async GetEvents(ctx, startSequence, limit) {

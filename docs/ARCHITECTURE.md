@@ -22,8 +22,9 @@ identities and converts browser requests into endorsed Fabric transactions.
 
 | Data | Authoritative system | Reason |
 | --- | --- | --- |
-| Administrator bootstrap, club creation and advisor appointment events | Hyperledger Fabric | Immutable, ordered and endorsed by institute and auditor peers |
-| Future competition, result, credential and revocation events | Hyperledger Fabric | Institutional records must be independently verifiable |
+| Administrator bootstrap, club creation, advisor appointment and role revocation events | Hyperledger Fabric | Immutable, ordered and endorsed by institute and auditor peers |
+| Future competition, result and credential events | Hyperledger Fabric | Institutional records must be independently verifiable |
+| Revocation list read model | PostgreSQL projection, indexed on Fabric | Verifiers need one fast status answer; Fabric remains authoritative |
 | Users, email verification tokens and login sessions | PostgreSQL | Private, expiring and operational data must not be permanently replicated |
 | Club and appointment read models | PostgreSQL projection | Efficient UI queries; each write is accepted only after Fabric confirms it |
 | Fabric transaction receipts | PostgreSQL projection | Connects local records to transaction IDs and block numbers |
@@ -65,9 +66,9 @@ backend/
   app/verification.py         Institute email validation and single-use links
   app/session.py              Login sessions, cookies and logout
   app/email_delivery.py       SMTP delivery
-  app/admin.py                Protected club/advisor HTTP endpoints
+  app/admin.py                Protected club/advisor/revocation HTTP endpoints
   app/authority.py            Event signing, Fabric submission and receipts
-  app/ledger.py               Read-only Fabric audit API
+  app/ledger.py               Read-only Fabric audit API and revocation list
   app/models.py               Auth/private tables and local projections
   app/bootstrap.py            Operator-only administrator/key commands
   app/preflight.py            SMTP and Drive connectivity checks
@@ -103,15 +104,39 @@ must be opened through its desktop application.
 - Server-side sessions with revocation and secure-cookie behavior.
 - Controlled initial administrator bootstrap.
 - Club creation and faculty-advisor appointment.
-- Fabric events for `ADMIN_BOOTSTRAPPED`, `CLUB_CREATED` and
-  `ADVISOR_APPOINTED`.
+- Fabric events for `ADMIN_BOOTSTRAPPED`, `CLUB_CREATED`, `ADVISOR_APPOINTED`
+  and `ROLE_REVOKED`.
 - Two-organization Fabric endorsement policy requiring Org1 and Org2.
 - Direct audit endpoints at `/api/ledger/health`, `/api/ledger/events` and
   `/api/ledger/events/{request_id}`.
+- Administrator-signed appointment revocation and the public revocation list at
+  `/api/ledger/revocations`, `/api/ledger/revocations/{type}/{id}` and
+  `/api/ledger/fabric-revocations`.
 
-Competition creation, result submission, credential issuance and revocation are
-represented in the planned projection schema but do not yet have workflows or
-Fabric event handlers. They must follow the same commit-first flow above.
+Competition creation, result submission and credential issuance are represented
+in the planned projection schema but do not yet have workflows or Fabric event
+handlers. They must follow the same commit-first flow above. Credential
+revocation (`ACHIEVEMENT_REVOKED`) is validated and indexed by the chaincode and
+listed by the revocation endpoints, but has no write endpoint until issuance
+exists.
+
+## Revocation and the revocation list
+
+Revocation is an appended event, never an edit: `ROLE_REVOKED` records the end of
+authority and the projection's `revoked_at`/`revocation_transaction_id` pair is
+set only after Fabric confirms. The chaincode refuses a revocation whose subject
+has no granting event or is already revoked, and maintains a `revocation:`
+subject index so a verifier's "is this revoked?" question is a direct lookup
+rather than a replay of the whole ledger.
+
+The read endpoints are deliberately unauthenticated: an external placement
+verifier holds a student's share link, not an institute account. They return
+`checked_at` because, as the design document notes, an offline signature check
+cannot establish that no later revocation exists. An absent entry means "not
+revoked as of `checked_at`" — it is not a proof of validity, and a verifier that
+cannot reach this endpoint must report status unknown rather than valid.
+`/api/ledger/fabric-revocations` reads the on-chain index directly so the
+PostgreSQL projection can be audited against Fabric.
 
 ## Where to add the next feature
 
