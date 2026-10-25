@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-down fabric-test backend-test frontend-test test
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-down fabric-test ethereum-install ethereum-node ethereum-deploy ethereum-test backend-test frontend-test test
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
@@ -20,7 +20,11 @@ help:
 	@echo "make fabric-up      Start two-organization Fabric and deploy chaincode"
 	@echo "make fabric-upgrade Upgrade an existing JS chaincode deployment to Java"
 	@echo "make fabric-down    Delete the local Fabric network and ledger"
-	@echo "make test           Run backend, chaincode, and frontend checks"
+	@echo "make ethereum-install Install the Hardhat toolchain for the Ethereum ledger"
+	@echo "make ethereum-node  Run a local Ethereum chain in this terminal (port 8545)"
+	@echo "make ethereum-deploy Deploy the ledger contract to the local chain"
+	@echo "make ethereum-test  Run the Solidity contract tests"
+	@echo "make test           Run backend, chaincode, contract, and frontend checks"
 
 docker:
 	@if docker info >/dev/null 2>&1; then \
@@ -109,7 +113,19 @@ backend-test:
 fabric-test:
 	@GRADLE_USER_HOME="$(CURDIR)/.gradle" ./fabric/chaincode/gradlew -p fabric/chaincode test
 
+ethereum-install:
+	@cd ethereum && npm ci
+
+ethereum-node:
+	@cd ethereum && npm run node
+
+ethereum-deploy:
+	@cd ethereum && npm run deploy
+
+ethereum-test:
+	@cd ethereum && npm test
+
 frontend-test:
 	@cd frontend && npm run build
 
-test: backend-test fabric-test frontend-test
+test: backend-test fabric-test ethereum-test frontend-test

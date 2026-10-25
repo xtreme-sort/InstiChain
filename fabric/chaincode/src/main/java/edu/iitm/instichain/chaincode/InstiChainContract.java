@@ -34,6 +34,9 @@ public final class InstiChainContract implements ContractInterface {
     private static final Map<String, String> REVOCATION_SUBJECTS = Map.of(
             "ROLE_REVOKED", "appointment_id",
             "ACHIEVEMENT_REVOKED", "credential_id");
+    private static final String SUBJECT_PREFIX = "subject:";
+    private static final Map<String, String> ISSUED_SUBJECTS = Map.of(
+            "ACHIEVEMENT_ISSUED", "credential_ids");
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public String AppendEvent(Context context, String requestJson) {
@@ -48,8 +51,8 @@ public final class InstiChainContract implements ContractInterface {
             }
         }
         requireUuid(request.path("request_id").asText(), "request IDs must be lowercase UUIDs");
-        requireUuid(request.path("actor_id").asText(), "request IDs must be lowercase UUIDs");
-        requireUuid(request.path("actor_key_id").asText(), "request IDs must be lowercase UUIDs");
+        requireUuid(request.path("actor_id").asText(), "actor_id must be a lowercase UUID");
+        requireUuid(request.path("actor_key_id").asText(), "actor_key_id must be a lowercase UUID");
         if (!EVENT_TYPE.matcher(request.path("event_type").asText()).matches()) {
             throw fail("event_type must be uppercase snake case");
         }
@@ -77,8 +80,30 @@ public final class InstiChainContract implements ContractInterface {
             if (hasBytes(context.getStub().getState(REVOCATION_PREFIX + subjectId))) {
                 throw fail(subjectField + " " + subjectId + " is already revoked");
             }
-            if (!hasBytes(context.getStub().getState(EVENT_PREFIX + subjectId))) {
+            if (!hasBytes(context.getStub().getState(EVENT_PREFIX + subjectId))
+                    && !hasBytes(context.getStub().getState(SUBJECT_PREFIX + subjectId))) {
                 throw fail(subjectField + " " + subjectId + " has no granting event to revoke");
+            }
+        }
+
+        // Credentials are identified by their own IDs, not by the issuing request ID,
+        // so each issued credential is indexed to make it revocable later.
+        List<String> issuedSubjects = new ArrayList<>();
+        if (ISSUED_SUBJECTS.containsKey(eventType)) {
+            String field = ISSUED_SUBJECTS.get(eventType);
+            JsonNode ids = request.path("object_ids").path(field);
+            if (!ids.isArray() || ids.isEmpty()) {
+                throw fail(eventType + " requires object_ids." + field + " as a non-empty array");
+            }
+            for (JsonNode id : ids) {
+                String issued = id.asText();
+                requireUuid(issued, field + " must contain lowercase UUIDs");
+                if (issuedSubjects.contains(issued)
+                        || hasBytes(context.getStub().getState(SUBJECT_PREFIX + issued))
+                        || hasBytes(context.getStub().getState(EVENT_PREFIX + issued))) {
+                    throw fail(issued + " is already recorded");
+                }
+                issuedSubjects.add(issued);
             }
         }
 
@@ -98,6 +123,9 @@ public final class InstiChainContract implements ContractInterface {
         byte[] bytes = stringify(event).getBytes(StandardCharsets.UTF_8);
         context.getStub().putState(key, bytes);
         context.getStub().putState(sequenceKey(sequence), bytes);
+        for (String issued : issuedSubjects) {
+            context.getStub().putState(SUBJECT_PREFIX + issued, requestId.getBytes(StandardCharsets.UTF_8));
+        }
         if (subjectField != null) {
             ObjectNode revocation = JSON.createObjectNode();
             revocation.put("subject_field", subjectField);

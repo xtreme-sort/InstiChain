@@ -74,4 +74,46 @@ class InstiChainContractTest {
         assertNotNull(state.get("ledger:head"));
         verify(stub).setEvent("InstiChainEvent", first.getBytes(StandardCharsets.UTF_8));
     }
+
+    @Test
+    void revokesAnIssuedCredentialExactlyOnce() {
+        Context context = mock(Context.class);
+        ChaincodeStub stub = mock(ChaincodeStub.class);
+        ClientIdentity identity = mock(ClientIdentity.class);
+        Map<String, byte[]> state = new HashMap<>();
+        when(context.getStub()).thenReturn(stub);
+        when(context.getClientIdentity()).thenReturn(identity);
+        when(identity.getMSPID()).thenReturn("Org1MSP");
+        when(stub.getState(any())).thenAnswer(call -> state.get(call.getArgument(0)));
+        doAnswer(call -> {
+            state.put(call.getArgument(0), call.getArgument(1));
+            return null;
+        }).when(stub).putState(any(), any());
+        when(stub.getTxId()).thenReturn("fabric-tx");
+        when(stub.getTxTimestamp()).thenReturn(Instant.parse("2026-01-02T03:04:05Z"));
+        String credential = "0e9b6f6c-2f6f-5a4e-9b1c-6d2c8e3f4a5b";
+        String actors = """
+                "actor_id":"7cb67e32-8c60-405c-b902-a9977c910c2c",
+                "actor_key_id":"2de79313-95c5-49c3-9459-fe3355fc016c","signature":"signed"}
+                """;
+        InstiChainContract contract = new InstiChainContract();
+
+        assertThrows(ChaincodeException.class, () -> contract.AppendEvent(context, """
+                {"request_id":"11111111-1111-4111-8111-111111111111","event_type":"ACHIEVEMENT_REVOKED",
+                 "object_ids":{"credential_id":"%s"},"payload":{},""".formatted(credential) + actors));
+
+        contract.AppendEvent(context, """
+                {"request_id":"22222222-2222-4222-8222-222222222222","event_type":"ACHIEVEMENT_ISSUED",
+                 "object_ids":{"credential_ids":["%s"]},"payload":{},""".formatted(credential) + actors);
+        assertNotNull(state.get("subject:" + credential));
+
+        contract.AppendEvent(context, """
+                {"request_id":"33333333-3333-4333-8333-333333333333","event_type":"ACHIEVEMENT_REVOKED",
+                 "object_ids":{"credential_id":"%s"},"payload":{},""".formatted(credential) + actors);
+        assertNotNull(state.get("revocation:" + credential));
+
+        assertThrows(ChaincodeException.class, () -> contract.AppendEvent(context, """
+                {"request_id":"44444444-4444-4444-8444-444444444444","event_type":"ACHIEVEMENT_REVOKED",
+                 "object_ids":{"credential_id":"%s"},"payload":{},""".formatted(credential) + actors));
+    }
 }

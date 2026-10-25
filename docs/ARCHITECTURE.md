@@ -8,10 +8,17 @@ React browser client
         v
 Spring Boot API (Java 21)
         |
-        +-- Hyperledger Fabric: authoritative institutional events
+        +-- Ledger (one of):
+        |     Hyperledger Fabric (default): authoritative institutional events
+        |     Ethereum: hashes of the same signed events
         +-- PostgreSQL: authentication, private data, and query projections
         +-- SMTP / Mailpit: email-link delivery
 ```
+
+`INSTICHAIN_LEDGER` selects the ledger. Both implement
+`ledger/LedgerClient.java`, so controllers and the confirmed-write flow below are
+identical. The Ethereum contract stores keccak256 hashes of the signed canonical
+documents; the full documents stay in PostgreSQL and reads report `hash_verified`.
 
 The API authenticates people, enforces authorization, prepares and verifies
 signatures, submits institutional events to Fabric, and maintains PostgreSQL read
@@ -61,6 +68,7 @@ backend/
     config/                  Typed environment configuration and transactions
     domain/                  Clubs, advisors, roles, competitions, results, issuance
     fabric/                  Direct Gateway client, receipts, audit API
+    ledger/                  LedgerClient interface and Ethereum (web3j) client
     web/                     Health endpoint
   src/main/resources/
     application.yml          Environment bindings
@@ -72,6 +80,11 @@ fabric/chaincode/
   src/main/java/             Ledger contract
   src/test/java/             Contract tests
   gradlew                    Pinned Gradle wrapper
+
+ethereum/
+  contracts/                 InstiChainLedger.sol
+  test/                      Contract tests
+  scripts/deploy.js          Local deployment
 
 scripts/
   dev.sh                     Frontend/backend start, stop, and status

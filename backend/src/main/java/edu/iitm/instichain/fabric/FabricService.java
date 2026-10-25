@@ -31,10 +31,14 @@ import org.hyperledger.fabric.client.identity.Signers;
 import org.hyperledger.fabric.client.identity.X509Identity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import edu.iitm.instichain.ledger.LedgerClient;
+import java.util.UUID;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 @Service
-public class FabricService {
+@ConditionalOnProperty(prefix = "instichain", name = "ledger", havingValue = "fabric", matchIfMissing = true)
+public class FabricService implements LedgerClient {
     private static final Logger LOG = LoggerFactory.getLogger(FabricService.class);
     private final InstiChainProperties properties;
     private final CanonicalJson json;
@@ -47,9 +51,33 @@ public class FabricService {
         this.json = json;
     }
 
+    @Override
+    public String source() { return "fabric"; }
+
+    @Override
+    public String network() { return properties.fabric().channelName(); }
+
+    @Override
+    public String contract() { return properties.fabric().chaincodeName(); }
+
+    @Override
+    public JsonNode head() { return evaluate("GetHead"); }
+
+    @Override
+    public JsonNode events(int startSequence, int limit) {
+        return evaluate("GetEvents", Integer.toString(startSequence), Integer.toString(limit));
+    }
+
+    @Override
+    public JsonNode event(UUID requestId) { return evaluate("GetEvent", requestId.toString()); }
+
+    @Override
+    public JsonNode revocations() { return evaluate("GetRevocations"); }
+
+    @Override
     public synchronized Receipt submit(JsonNode document) {
         try {
-            Proposal proposal = contract().newProposal("AppendEvent")
+            Proposal proposal = gatewayContract().newProposal("AppendEvent")
                     .addArguments(json.string(document)).build();
             Transaction transaction = proposal.endorse();
             SubmittedTransaction submitted = transaction.submitAsync();
@@ -70,14 +98,16 @@ public class FabricService {
 
     public JsonNode evaluate(String transaction, String... arguments) {
         try {
-            return json.parse(contract().evaluateTransaction(transaction, arguments));
+            return json.parse(gatewayContract().evaluateTransaction(transaction, arguments));
         } catch (Exception error) {
             LOG.warn("Fabric evaluation {} failed", transaction, error);
             throw new FabricUnavailableException("The Fabric ledger is unavailable", error);
         }
     }
 
-    private Contract contract() throws IOException, CertificateException, InvalidKeyException {
+    // Synchronized so concurrent first calls do not open two gateway connections.
+    private synchronized Contract gatewayContract()
+            throws IOException, CertificateException, InvalidKeyException {
         if (contract != null) return contract;
         InstiChainProperties.Fabric fabric = properties.fabric();
         Path crypto = required(fabric.cryptoPath(), "INSTICHAIN_FABRIC_CRYPTO_PATH");
@@ -129,7 +159,4 @@ public class FabricService {
         if (gateway != null) gateway.close();
         if (channel != null) channel.shutdownNow();
     }
-
-    public record Receipt(JsonNode event, String submittedTransactionId,
-                          long blockNumber, int validationCode) {}
 }

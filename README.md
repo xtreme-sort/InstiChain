@@ -22,6 +22,7 @@ launchers that download their distributions on first use.
 ```text
 backend/                 Spring Boot API, Flyway migrations, and Java tests
 fabric/chaincode/        Hyperledger Fabric Java smart contract
+ethereum/                Alternative Ethereum (Solidity) ledger contract
 frontend/                React and TypeScript browser client
 scripts/                 Development and Fabric lifecycle commands
 docs/ARCHITECTURE.md     System design and source-code map
@@ -122,6 +123,20 @@ The events response shows sequence, transaction ID, actor, object IDs, payload,
 signature, submitting MSP, and commit time. PostgreSQL contains private data and
 fast projections; Fabric is authoritative for issued institutional records.
 
+## Ethereum ledger (alternative)
+
+Fabric is the default ledger. To use Ethereum instead, run a local chain and
+deploy the contract, then set `INSTICHAIN_LEDGER=ethereum` in `backend/.env`:
+
+```bash
+make ethereum-install
+make ethereum-node       # separate terminal
+make ethereum-deploy
+```
+
+Only hashes of signed event documents are written on-chain. See
+[ethereum/README.md](ethereum/README.md) for details and limitations.
+
 ## Tests
 
 ```bash
@@ -133,6 +148,7 @@ Or run layers separately:
 ```bash
 make backend-test
 make fabric-test
+make ethereum-test
 make frontend-test
 ```
 
@@ -149,6 +165,8 @@ is `backend/.env.example`.
 | `INSTICHAIN_SMTP_*` | Mailpit or real SMTP provider |
 | `INSTICHAIN_ADMIN_SIGNING_KEY_FILE` | Protected administrator Ed25519 key |
 | `INSTICHAIN_FABRIC_*` | Fabric channel, chaincode, peer, identity, and TLS paths |
+| `INSTICHAIN_LEDGER` | `fabric` (default) or `ethereum` |
+| `INSTICHAIN_ETHEREUM_*` | Ethereum RPC URL, chain ID, contract address, and writer key |
 
 Local Compose credentials and Fabric test-network identities are development-only.
 Production organizations must operate their Fabric nodes and keys independently.

@@ -2,13 +2,14 @@ package edu.iitm.instichain.fabric;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import edu.iitm.instichain.common.ApiException;
-import edu.iitm.instichain.config.InstiChainProperties;
+import edu.iitm.instichain.ledger.LedgerClient;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,21 +22,20 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/ledger")
 public class LedgerController {
-    private final FabricService fabric;
+    private final LedgerClient ledger;
     private final JdbcTemplate jdbc;
-    private final InstiChainProperties properties;
 
-    public LedgerController(FabricService fabric, JdbcTemplate jdbc,
-                            InstiChainProperties properties) {
-        this.fabric = fabric;
+    public LedgerController(LedgerClient ledger, JdbcTemplate jdbc) {
+        this.ledger = ledger;
         this.jdbc = jdbc;
-        this.properties = properties;
     }
 
     @GetMapping("/health")
     Map<String, Object> health() {
-        return Map.of("status", "ok", "channel", properties.fabric().channelName(),
-                "chaincode", properties.fabric().chaincodeName(), "head", evaluate("GetHead"));
+        // channel/chaincode keep their names for existing clients; they hold the
+        // chain ID and contract address when the Ethereum ledger is active.
+        return Map.of("status", "ok", "ledger", ledger.source(), "channel", ledger.network(),
+                "chaincode", ledger.contract(), "head", read(ledger::head));
     }
 
     @GetMapping("/events")
@@ -43,14 +43,18 @@ public class LedgerController {
                     @RequestParam(defaultValue = "50") int limit) {
         if (start < 1 || limit < 1 || limit > 200) throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
                 "start must be positive and limit must be between 1 and 200");
-        return evaluate("GetEvents", Integer.toString(start), Integer.toString(limit));
+        return read(() -> ledger.events(start, limit));
     }
 
     @GetMapping("/events/{requestId}")
-    JsonNode event(@PathVariable UUID requestId) { return evaluate("GetEvent", requestId.toString()); }
+    JsonNode event(@PathVariable UUID requestId) {
+        JsonNode event = read(() -> ledger.event(requestId));
+        if (event == null) throw new ApiException(HttpStatus.NOT_FOUND, "Ledger event not found.");
+        return event;
+    }
 
-    @GetMapping("/fabric-revocations")
-    JsonNode fabricRevocations() { return evaluate("GetRevocations"); }
+    @GetMapping({"/fabric-revocations", "/ledger-revocations"})
+    JsonNode ledgerRevocations() { return read(ledger::revocations); }
 
     @GetMapping("/revocations")
     Map<String, Object> revocations(@RequestParam(required = false) String subject,
@@ -94,10 +98,10 @@ public class LedgerController {
         return result;
     }
 
-    private JsonNode evaluate(String transaction, String... arguments) {
-        try { return fabric.evaluate(transaction, arguments); }
+    private JsonNode read(Supplier<JsonNode> query) {
+        try { return query.get(); }
         catch (FabricUnavailableException error) {
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "The Fabric ledger is unavailable.");
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "The ledger is unavailable.");
         }
     }
 

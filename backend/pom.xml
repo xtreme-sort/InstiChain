@@ -21,7 +21,8 @@
         <fabric-gateway.version>1.12.1</fabric-gateway.version>
         <grpc.version>1.83.1</grpc.version>
         <protobuf.version>4.36.0</protobuf.version>
-        <testcontainers.version>1.21.3</testcontainers.version>
+        <web3j.version>4.12.3</web3j.version>
+        <testcontainers.version>1.21.4</testcontainers.version>
     </properties>
 
     <dependencies>
@@ -77,6 +78,11 @@
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
             <version>1.81</version>
+        </dependency>
+        <dependency>
+            <groupId>org.web3j</groupId>
+            <artifactId>core</artifactId>
+            <version>${web3j.version}</version>
         </dependency>
 
         <dependency>
