@@ -56,29 +56,10 @@ Click any link to jump to the definition. Line numbers reflect the code as of th
 
 | What | Where |
 | --- | --- |
-| Ledger interface (Fabric or Ethereum) | [LedgerClient](backend/src/main/java/edu/iitm/instichain/ledger/LedgerClient.java#L11) · [Receipt](backend/src/main/java/edu/iitm/instichain/ledger/LedgerClient.java#L37) |
-| Fabric Gateway client | [FabricService](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L41) · [submit](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L78) · [evaluate](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L99) · [connection setup](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L109) |
-| Append event + save receipt | [LedgerEventService.append](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L50) · [appendAdmin](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L36) · [lock](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L32) |
-| Public ledger API (`/api/ledger`) | [LedgerController](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L24) · [health](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L33) · [events](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L41) · [ledger revocations](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L56) · [revocations](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L59) |
+| Gateway client | [FabricService](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L37) · [submit](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L50) · [evaluate](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L71) · [connection setup](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L80) |
+| Append event + save receipt | [LedgerEventService.append](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L49) · [appendAdmin](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L35) · [lock](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L31) |
+| Public ledger API (`/api/ledger`) | [LedgerController](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L23) · [events](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L41) · [revocations](backend/src/main/java/edu/iitm/instichain/fabric/LedgerController.java#L55) |
 | Fabric failure exception | [FabricUnavailableException](backend/src/main/java/edu/iitm/instichain/fabric/FabricUnavailableException.java#L3) |
-
-## Ethereum ledger (alternative to Fabric)
-
-| What | Where |
-| --- | --- |
-| Solidity contract | [InstiChainLedger](ethereum/contracts/InstiChainLedger.sol#L9) |
-| Contract write | [appendEvent](ethereum/contracts/InstiChainLedger.sol#L74) · [setWriter](ethereum/contracts/InstiChainLedger.sol#L64) |
-| Contract reads | [getEntry](ethereum/contracts/InstiChainLedger.sol#L114) · [requestAt](ethereum/contracts/InstiChainLedger.sol#L127) · [issuerOf](ethereum/contracts/InstiChainLedger.sol#L131) · [revocationOf](ethereum/contracts/InstiChainLedger.sol#L135) · [revokedSubjectAt](ethereum/contracts/InstiChainLedger.sol#L143) |
-| Java client (web3j) | [EthereumService](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L65) · [submit](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L101) · [events](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L173) · [hash check vs PostgreSQL](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L236) · [connection setup](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L326) |
-| Chain-reset guard | [requireChainMatchesProjection](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L366) |
-| UUID / event-type encoding | [uuidBytes and friends](backend/src/main/java/edu/iitm/instichain/ledger/EthereumService.java#L398) |
-| Ledger selector + settings | [InstiChainProperties.Ethereum](backend/src/main/java/edu/iitm/instichain/config/InstiChainProperties.java) · [application.yml](backend/src/main/resources/application.yml) |
-| `source = 'ethereum'` migration | [V3](backend/src/main/resources/db/migration/V3__ethereum_ledger_source.sql) |
-| Deploy script | [deploy.js](ethereum/scripts/deploy.js#L5) |
-| Hardhat config | [hardhat.config.js](ethereum/hardhat.config.js) |
-| Contract tests | [InstiChainLedger.test.js](ethereum/test/InstiChainLedger.test.js) |
-| Java tests | [EthereumEncodingTest](backend/src/test/java/edu/iitm/instichain/ledger/EthereumEncodingTest.java) · [EthereumServiceIT (live chain)](backend/src/test/java/edu/iitm/instichain/ledger/EthereumServiceIT.java) |
-| Guide | [ethereum/README.md](ethereum/README.md) |
 
 ## Backend: common utilities (`common/`)
 
@@ -180,8 +161,8 @@ Most "model" classes are Java `record`s nested inside the service or controller 
 | `IssuanceController.Submission` | frozen submission being issued | [IssuanceController.java](backend/src/main/java/edu/iitm/instichain/domain/IssuanceController.java#L52) |
 | `IssuanceController.Claim` | one credential claim | [IssuanceController.java](backend/src/main/java/edu/iitm/instichain/domain/IssuanceController.java#L55) |
 | `IssuanceController.Credential` | issued credential row | [IssuanceController.java](backend/src/main/java/edu/iitm/instichain/domain/IssuanceController.java#L56) |
-| `LedgerClient.Receipt` | ledger commit result (Fabric or Ethereum) | [LedgerClient.java](backend/src/main/java/edu/iitm/instichain/ledger/LedgerClient.java#L37) |
-| `LedgerEventService.Event` | committed ledger event | [LedgerEventService.java](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L82) |
+| `FabricService.Receipt` | Fabric commit result | [FabricService.java](backend/src/main/java/edu/iitm/instichain/fabric/FabricService.java#L133) |
+| `LedgerEventService.Event` | committed ledger event | [LedgerEventService.java](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L81) |
 | `InstiChainProperties` (+ `Smtp`, `Fabric`) | configuration | [InstiChainProperties.java](backend/src/main/java/edu/iitm/instichain/config/InstiChainProperties.java#L13) |
 | `OperatorCli.PreflightConfiguration` | Spring context for smtp/drive checks | [OperatorCli.java](backend/src/main/java/edu/iitm/instichain/cli/OperatorCli.java#L105) |
 
@@ -205,7 +186,7 @@ Most "model" classes are Java `record`s nested inside the service or controller 
 | Constant | Where |
 | --- | --- |
 | Session cookie name `COOKIE_NAME` | [SessionService.java](backend/src/main/java/edu/iitm/instichain/auth/SessionService.java#L22) |
-| Global ledger advisory lock `LEDGER_LOCK` | [LedgerEventService.java](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L18) |
+| Global ledger advisory lock `LEDGER_LOCK` | [LedgerEventService.java](backend/src/main/java/edu/iitm/instichain/fabric/LedgerEventService.java#L17) |
 | Role sets `VIEWERS` / `OFFICERS` | [CompetitionController.java](backend/src/main/java/edu/iitm/instichain/domain/CompetitionController.java#L27) · [ResultController.java](backend/src/main/java/edu/iitm/instichain/domain/ResultController.java#L33) |
 | Role set `ADVISOR` | [AdvisorController.java](backend/src/main/java/edu/iitm/instichain/domain/AdvisorController.java#L39) · [IssuanceController.java](backend/src/main/java/edu/iitm/instichain/domain/IssuanceController.java#L35) |
 | Email regex `ADDRESS` | [InstituteEmail.java](backend/src/main/java/edu/iitm/instichain/auth/InstituteEmail.java#L7) |

@@ -40,13 +40,6 @@ instichain:
     username: ${INSTICHAIN_SMTP_USERNAME:}
     password: ${INSTICHAIN_SMTP_PASSWORD:}
     from: ${INSTICHAIN_SMTP_FROM:InstiChain <no-reply@instichain.local>}
-  # Authoritative ledger: fabric (default) or ethereum.
-  ledger: ${INSTICHAIN_LEDGER:fabric}
-  ethereum:
-    rpc-url: ${INSTICHAIN_ETHEREUM_RPC_URL:http://127.0.0.1:8545}
-    chain-id: ${INSTICHAIN_ETHEREUM_CHAIN_ID:31337}
-    contract-address: ${INSTICHAIN_ETHEREUM_CONTRACT_ADDRESS:}
-    private-key: ${INSTICHAIN_ETHEREUM_PRIVATE_KEY:}
   fabric:
     channel-name: ${INSTICHAIN_FABRIC_CHANNEL_NAME:instichain}
     chaincode-name: ${INSTICHAIN_FABRIC_CHAINCODE_NAME:instichain}

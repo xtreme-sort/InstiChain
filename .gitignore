@@ -25,10 +25,3 @@ __pycache__/
 
 # Downloaded Hyperledger Fabric runtime, identities and channel artifacts
 fabric/runtime/
-
-# Hardhat build output and local deployment records
-ethereum/artifacts/
-ethereum/cache/
-ethereum/deployments/
-ethereum/typechain-types/
-ethereum/coverage/

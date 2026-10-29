@@ -5,7 +5,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -18,9 +17,7 @@ public record InstiChainProperties(
         @Min(1) @Max(100) int verificationDailyLimit,
         @Min(1) @Max(365) int sessionTtlDays,
         @Valid Smtp smtp,
-        @Pattern(regexp = "fabric|ethereum") String ledger,
         @Valid Fabric fabric,
-        Ethereum ethereum,
         Path adminSigningKeyFile,
         String driveTestAccessToken,
         String driveTestFileId) {
@@ -34,7 +31,4 @@ public record InstiChainProperties(
                          Path cryptoPath, Path keyDirectory, Path certDirectory,
                          Path tlsCertPath, @NotBlank String peerEndpoint,
                          @NotBlank String peerHostAlias) {}
-
-    /** Checked when the Ethereum ledger first connects, so Fabric deployments need none of it. */
-    public record Ethereum(String rpcUrl, long chainId, String contractAddress, String privateKey) {}
 }

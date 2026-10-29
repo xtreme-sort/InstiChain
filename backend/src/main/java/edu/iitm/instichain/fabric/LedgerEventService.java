@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import edu.iitm.instichain.common.CanonicalJson;
 import edu.iitm.instichain.common.Ed25519;
 import edu.iitm.instichain.config.InstiChainProperties;
-import edu.iitm.instichain.ledger.LedgerClient;
 import java.security.PrivateKey;
 import java.time.OffsetDateTime;
 import java.util.Base64;
@@ -18,14 +17,14 @@ public class LedgerEventService {
     public static final long LEDGER_LOCK = 50130001L;
     private final JdbcTemplate jdbc;
     private final CanonicalJson json;
-    private final LedgerClient ledger;
+    private final FabricService fabric;
     private final InstiChainProperties properties;
 
-    public LedgerEventService(JdbcTemplate jdbc, CanonicalJson json, LedgerClient ledger,
+    public LedgerEventService(JdbcTemplate jdbc, CanonicalJson json, FabricService fabric,
                               InstiChainProperties properties) {
         this.jdbc = jdbc;
         this.json = json;
-        this.ledger = ledger;
+        this.fabric = fabric;
         this.properties = properties;
     }
 
@@ -51,12 +50,12 @@ public class LedgerEventService {
         JsonNode unsigned = json.tree(document);
         ObjectNode submitted = unsigned.deepCopy();
         submitted.put("signature", Base64.getEncoder().encodeToString(signature));
-        LedgerClient.Receipt receipt = ledger.submit(submitted);
+        FabricService.Receipt receipt = fabric.submit(submitted);
         JsonNode event = receipt.event();
         for (String field : new String[]{"request_id", "event_type", "object_ids", "payload",
                 "actor_id", "actor_key_id"}) {
             if (!event.path(field).equals(unsigned.path(field))) {
-                throw new FabricUnavailableException("The ledger returned a mismatched event");
+                throw new FabricUnavailableException("Fabric returned a mismatched event");
             }
         }
         UUID requestId = UUID.fromString(event.path("request_id").asText());
@@ -67,11 +66,11 @@ public class LedgerEventService {
                     submitted_transaction_id, channel_name, chaincode_name, block_number,
                     validation_code, schema_version, event_type, object_ids, payload,
                     actor_id, actor_key_id, signature, committed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
+                VALUES (?, 'fabric', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?)
                 ON CONFLICT (request_id) DO NOTHING
-                """, requestId, ledger.source(), event.path("sequence").asLong(),
+                """, requestId, event.path("sequence").asLong(),
                 event.path("fabric_transaction_id").asText(), receipt.submittedTransactionId(),
-                ledger.network(), ledger.contract(),
+                properties.fabric().channelName(), properties.fabric().chaincodeName(),
                 receipt.blockNumber(), receipt.validationCode(), event.path("schema_version").asInt(),
                 event.path("event_type").asText(), event.path("object_ids").toString(),
                 event.path("payload").toString(), UUID.fromString(event.path("actor_id").asText()),
