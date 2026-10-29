@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { RotateCcw, UserPlus } from 'lucide-react'
 import { signPreparedPayload } from './signingIdentity'
+import IssuancePanel from './IssuancePanel'
 
 type Club = {
   id: string
@@ -213,6 +214,7 @@ export default function AdvisorPanel({ userId }: Props) {
           </li>)}
         </ul>
       </div>
+      {clubId && <IssuancePanel key={clubId} clubId={clubId} userId={userId} />}
     </section>
   )
 }
