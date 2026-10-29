@@ -165,6 +165,24 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .issuance-list code, .issuance-confirmation code { overflow-wrap: anywhere; }
 .issuance-list button { width: auto; min-height: 40px; height: auto; display: inline-flex; gap: 8px; padding: 8px 12px; font: inherit; font-size: 14px; }
 .issuance-confirmation { padding: 16px 0; color: #166c52; }
+.vault h1 { margin-bottom: 6px; }
+.vault p { line-height: 1.5; overflow-wrap: anywhere; }
+.vault-layout { display: grid; grid-template-columns: minmax(175px, 220px) minmax(0, 1fr); gap: 24px; margin-top: 24px; }
+.vault-list { display: grid; align-content: start; border-top: 1px solid #dce3df; }
+.vault-list button { width: 100%; height: auto; min-height: 72px; padding: 10px; border: 0; border-bottom: 1px solid #dce3df; border-radius: 0; display: grid; gap: 3px; text-align: left; font: inherit; }
+.vault-list button.selected { background: #e8f1eb; color: #166c52; }
+.vault-list span, .vault-list small { font-size: 12px; color: #67716c; }
+.vault-detail { min-width: 0; }
+.vault-detail h2 { margin: 0 0 8px; font-size: 19px; }
+.vault-detail dl, .vault-verification dl { display: grid; grid-template-columns: minmax(110px, 140px) minmax(0, 1fr); gap: 8px 12px; font-size: 14px; }
+.vault-detail dt { color: #67716c; }
+.vault-detail dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.vault-detail code { overflow-wrap: anywhere; }
+.vault-verification, .vault-history { border-top: 1px solid #dce3df; margin-top: 22px; }
+.vault-verification h3, .vault-history h3 { font-size: 16px; }
+.vault-history ol { padding-left: 22px; }
+.vault-history li { padding: 7px 0; overflow-wrap: anywhere; }
+.vault-history li span { display: block; color: #67716c; font-size: 13px; }
 @media (max-width: 600px) {
   .admin-forms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .advisor-row { grid-template-columns: minmax(0, 1fr); }
@@ -174,6 +192,8 @@ button:disabled { opacity: 0.5; cursor: wait; }
   .revoke-form button { width: 100%; }
   .workflow-form fieldset { grid-template-columns: minmax(0, 1fr); }
   .workflow-list button { align-items: start; flex-direction: column; gap: 4px; }
+  .vault-layout { grid-template-columns: minmax(0, 1fr); }
+  .vault-list { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 }
 @media (max-width: 420px) {
   .service { grid-template-columns: minmax(0, 1fr) 36px; }

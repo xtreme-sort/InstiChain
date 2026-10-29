@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Link2, RefreshCw, Settings2, ShieldCheck, Trophy, UserRound } from 'lucide-react'
+import { Award, Link2, RefreshCw, Settings2, ShieldCheck, Trophy, UserRound } from 'lucide-react'
 import EmailVerification from './EmailVerification'
 import AdminPanel from './AdminPanel'
 import AdvisorPanel from './AdvisorPanel'
 import CompetitionPanel from './CompetitionPanel'
+import CredentialVault from './CredentialVault'
 import type { OfficerClub } from './CompetitionPanel'
 import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
-type Workspace = 'account' | 'admin' | 'advisor' | 'competitions'
+type Workspace = 'account' | 'admin' | 'advisor' | 'competitions' | 'credentials'
 
 export default function App() {
   const [connection, setConnection] = useState<Connection>('checking')
@@ -113,6 +114,10 @@ export default function App() {
             aria-current={workspace === 'account' ? 'page' : undefined} onClick={() => setWorkspace('account')}>
             <UserRound size={17} aria-hidden="true" /> Account
           </button>
+          <button type="button" className={workspace === 'credentials' ? 'selected' : ''}
+            aria-current={workspace === 'credentials' ? 'page' : undefined} onClick={() => setWorkspace('credentials')}>
+            <Award size={17} aria-hidden="true" /> My credentials
+          </button>
           {access.admin && <button type="button" className={workspace === 'admin' ? 'selected' : ''}
             aria-current={workspace === 'admin' ? 'page' : undefined} onClick={() => setWorkspace('admin')}>
             <Settings2 size={17} aria-hidden="true" /> Administration
@@ -137,6 +142,7 @@ export default function App() {
           <AdvisorPanel key={`advisor-${account.id}`} userId={account.id} />}
         {account && !linkMode && workspace === 'competitions' && officerClubs.length > 0 &&
           <CompetitionPanel key={`competitions-${account.id}`} clubs={officerClubs} />}
+        {account && !linkMode && workspace === 'credentials' && <CredentialVault key={account.id} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>

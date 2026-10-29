@@ -50,6 +50,16 @@ public class CredentialVerificationController {
         return verification.verify(subject);
     }
 
+    @GetMapping("/advisor/clubs/{clubId}/credentials/{credentialId}/history")
+    List<CredentialVerificationService.HistoryItem> advisorHistory(@PathVariable UUID clubId,
+                                                                   @PathVariable UUID credentialId,
+                                                                   HttpServletRequest request) {
+        access.club(request, clubId, Set.of("faculty_advisor"));
+        CredentialVerificationService.Subject subject = verification.subject(credentialId);
+        if (!clubId.equals(subject.clubId())) throw notFound();
+        return verification.history(subject);
+    }
+
     private static ApiException notFound() {
         return new ApiException(HttpStatus.NOT_FOUND, "Credential not found.");
     }

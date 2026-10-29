@@ -1,6 +1,10 @@
 # InstiChain Implementation Plan
 
-This is the remaining-work plan for the current **Java/Spring Boot + Hyperledger Fabric** repository. It replaces the older FastAPI-based plan. Complete the commits in order; each prompt is intended to be pasted as a separate coding request. Do not commit automatically unless asked.
+This is the implementation plan for the current **Java/Spring Boot + Hyperledger Fabric** repository. It replaces the older FastAPI-based plan. Complete the commits in order; each prompt is intended to be pasted as a separate coding request. Do not commit automatically unless asked.
+
+## Progress
+
+Commits **1.1 through 2.4 are implemented locally**. Twelve planned commits remain, starting at **3.1**. The credential revocation contract change in 2.2 requires `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. The current UI does not yet include a credential-revocation control, and live end-to-end Fabric tests remain pending.
 
 ## What Is Implemented Now
 
@@ -11,8 +15,9 @@ This is the remaining-work plan for the current **Java/Spring Boot + Hyperledger
 | Signing identity | Browser-generated Ed25519 key in IndexedDB; public key registered with the API; local signing for advisor role actions | `frontend/src/signingIdentity.ts`, `frontend/src/SigningIdentity.tsx`, `backend/src/main/java/edu/iitm/instichain/auth/SigningKeyController.java` |
 | Administration | Controlled CLI bootstrap, club creation, advisor appointment, admin UI | `backend/src/main/java/edu/iitm/instichain/cli/`, `backend/src/main/java/edu/iitm/instichain/domain/AdminController.java`, `frontend/src/AdminPanel.tsx` |
 | Advisor roles | Advisor club list, signed club-head/office-bearer grants and revocations, advisor UI | `backend/src/main/java/edu/iitm/instichain/domain/AdvisorController.java`, `frontend/src/AdvisorPanel.tsx` |
-| Competitions and results | Backend APIs for competition creation, result submission and immutable result versions; **no complete frontend workflow** | `CompetitionController.java`, `ResultController.java` |
-| Achievement issuance | Backend prepare/submit API for advisor-signed credential issuance; **no complete frontend workflow** | `IssuanceController.java` |
+| Competitions and results | Backend APIs and officer UI for competition creation, result submission and immutable result versions | `CompetitionController.java`, `ResultController.java`, `frontend/src/CompetitionPanel.tsx`, `frontend/src/ResultPanel.tsx` |
+| Achievement issuance | Backend prepare/submit API and advisor UI for locally signed credential issuance | `IssuanceController.java`, `frontend/src/IssuancePanel.tsx` |
+| Credential lifecycle | Student list/detail/vault, signed revocation API, historical verification and history APIs | `StudentCredentialController.java`, `CredentialRevocationController.java`, `CredentialVerificationService.java`, `frontend/src/CredentialVault.tsx` |
 | Fabric ledger | Java chaincode, direct Fabric Gateway client, confirmed-write receipts, event and revocation inspection endpoints | `fabric/chaincode/`, `backend/src/main/java/edu/iitm/instichain/fabric/` |
 
 The repository currently has **no Ethereum runtime**. Existing unit tests and builds have passed, but a full browser-to-Fabric end-to-end run has not been demonstrated by the test suite.
