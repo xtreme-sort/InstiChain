@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Link2, RefreshCw } from 'lucide-react'
+import { Link2, RefreshCw, Settings2, ShieldCheck, UserRound } from 'lucide-react'
 import EmailVerification from './EmailVerification'
 import AdminPanel from './AdminPanel'
 import AdvisorPanel from './AdvisorPanel'
 import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
+type Workspace = 'account' | 'admin' | 'advisor'
 
 export default function App() {
   const [connection, setConnection] = useState<Connection>('checking')
   const [attempt, setAttempt] = useState(0)
   const [account, setAccount] = useState<Account | null>(null)
   const [sessionChecked, setSessionChecked] = useState(false)
+  const [workspace, setWorkspace] = useState<Workspace>('account')
+  const [access, setAccess] = useState({ admin: false, advisor: false })
+  const [accessLoading, setAccessLoading] = useState(false)
+  const [accessError, setAccessError] = useState('')
   const [linkMode, setLinkMode] = useState(
     () => Boolean(new URLSearchParams(window.location.hash.slice(1)).get('token')),
   )
@@ -64,6 +69,28 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!account) {
+      setWorkspace('account')
+      setAccess({ admin: false, advisor: false })
+      return
+    }
+    let active = true
+    setAccessLoading(true)
+    setAccessError('')
+    void Promise.all(['/api/admin/access', '/api/advisor/access'].map(async (path) => {
+      const response = await fetch(path, { signal: AbortSignal.timeout(5000) })
+      if (response.status === 403) return false
+      if (!response.ok) throw new Error('Unable to check your workspace access.')
+      return true
+    })).then(([admin, advisor]) => {
+      if (active) setAccess({ admin, advisor })
+    }).catch((cause) => {
+      if (active) setAccessError(cause instanceof Error ? cause.message : 'Unable to check workspace access.')
+    }).finally(() => { if (active) setAccessLoading(false) })
+    return () => { active = false }
+  }, [account?.id])
+
   return (
     <>
       <header className="header">
@@ -72,12 +99,29 @@ export default function App() {
         <span className="version">0.1.0</span>
       </header>
       <main>
-        {sessionChecked && (
+        {account && !linkMode && <nav className="workspace-nav" aria-label="Workspaces">
+          <button type="button" className={workspace === 'account' ? 'selected' : ''}
+            aria-current={workspace === 'account' ? 'page' : undefined} onClick={() => setWorkspace('account')}>
+            <UserRound size={17} aria-hidden="true" /> Account
+          </button>
+          {access.admin && <button type="button" className={workspace === 'admin' ? 'selected' : ''}
+            aria-current={workspace === 'admin' ? 'page' : undefined} onClick={() => setWorkspace('admin')}>
+            <Settings2 size={17} aria-hidden="true" /> Administration
+          </button>}
+          {access.advisor && <button type="button" className={workspace === 'advisor' ? 'selected' : ''}
+            aria-current={workspace === 'advisor' ? 'page' : undefined} onClick={() => setWorkspace('advisor')}>
+            <ShieldCheck size={17} aria-hidden="true" /> Advisor
+          </button>}
+        </nav>}
+        {accessLoading && <p role="status">Checking workspace access...</p>}
+        {accessError && <p role="alert" className="unavailable">{accessError}</p>}
+        {sessionChecked && (!account || linkMode || workspace === 'account') && (
           <EmailVerification account={account} onSignedIn={setAccount} onSignedOut={() => setAccount(null)}
             onLinkModeChange={setLinkMode} />
         )}
-        {account && !linkMode && <AdminPanel key={account.id} />}
-        {account && !linkMode && <AdvisorPanel key={`advisor-${account.id}`} userId={account.id} />}
+        {account && !linkMode && workspace === 'admin' && access.admin && <AdminPanel key={account.id} />}
+        {account && !linkMode && workspace === 'advisor' && access.advisor &&
+          <AdvisorPanel key={`advisor-${account.id}`} userId={account.id} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>
