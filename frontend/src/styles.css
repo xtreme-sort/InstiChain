@@ -147,6 +147,14 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .workflow-detail { padding: 16px 0; }
 .workflow-detail dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; font-size: 14px; }
 .workflow-detail dd { margin: 0; overflow-wrap: anywhere; }
+.results-panel { margin-top: 28px; border-top: 1px solid #dce3df; }
+.results-panel h3 { font-size: 16px; }
+.result-list { list-style: none; padding: 0; margin: 0; }
+.result-list li { padding: 16px 0; border-top: 1px solid #dce3df; }
+.result-list p { margin: 6px 0; font-size: 14px; }
+.result-list code { overflow-wrap: anywhere; }
+.result-list span { color: #67716c; font-size: 13px; }
+.text-command { width: auto; height: auto; min-height: 36px; display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 10px; font: inherit; font-size: 14px; }
 @media (max-width: 600px) {
   .admin-forms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .advisor-row { grid-template-columns: minmax(0, 1fr); }

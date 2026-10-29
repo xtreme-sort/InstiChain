@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus } from 'lucide-react'
 import { apiRequest, postJson } from './api'
+import ResultPanel from './ResultPanel'
 
 export type OfficerClub = { id: string; name: string; slug: string; position: string }
 export type Competition = {
@@ -95,6 +96,7 @@ export default function CompetitionPanel({ clubs }: { clubs: OfficerClub[] }) {
       <dl><dt>Starts</dt><dd>{new Date(selected.starts_at).toLocaleString()}</dd>
         <dt>Ends</dt><dd>{selected.ends_at ? new Date(selected.ends_at).toLocaleString() : 'Not set'}</dd>
         <dt>Created by</dt><dd>{selected.created_by_name}</dd></dl>
+      <ResultPanel key={selected.id} clubId={clubId} competitionId={selected.id} />
     </section>}
   </section>
 }
