@@ -35,6 +35,17 @@ This commits version 2, sequence 2 of the same chaincode definition. Its keys an
 transaction names are compatible, so existing events remain readable. Do not run
 the upgrade twice. A fresh network needs only `make fabric-up`.
 
+When updating an already-deployed Java chaincode to include credential revocation,
+keep the network and ledger running, then deploy the next definition sequence:
+
+```bash
+make fabric-refresh FABRIC_SEQUENCE=2  # fresh Java deployment currently at sequence 1
+# or: make fabric-refresh FABRIC_SEQUENCE=3  # JS-to-Java upgrade currently at sequence 2
+```
+
+Increment `FABRIC_SEQUENCE` for later chaincode updates. Do not run the legacy
+`fabric-upgrade` command again on a Java deployment.
+
 ## Inspect the ledger
 
 With Fabric and the backend running:

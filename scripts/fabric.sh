@@ -78,6 +78,22 @@ case "$ACTION" in
             -ccep "AND('Org1MSP.peer','Org2MSP.peer')"
         echo "The instichain definition now runs Java chaincode; ledger state was preserved."
         ;;
+    refresh)
+        require_docker
+        [[ -x "$NETWORK/network.sh" ]] || { echo "Run 'make fabric-install' first." >&2; exit 1; }
+        [[ "${FABRIC_SEQUENCE:-}" =~ ^[2-9][0-9]*$ ]] || {
+            echo "Set FABRIC_SEQUENCE to the next chaincode sequence (2 for fresh Java v1, 3 for upgraded Java v2)." >&2
+            exit 2
+        }
+        network_running || { echo "Run 'make fabric-up' before refreshing chaincode." >&2; exit 1; }
+        cd "$NETWORK"
+        rm -f "$NETWORK/instichain.tar.gz"
+        ./network.sh deployCC -c instichain -ccn instichain \
+            -ccp "$ROOT/fabric/chaincode" -ccl java \
+            -ccv "${FABRIC_SEQUENCE}.0" -ccs "$FABRIC_SEQUENCE" \
+            -ccep "AND('Org1MSP.peer','Org2MSP.peer')"
+        echo "Java chaincode definition refreshed at sequence $FABRIC_SEQUENCE; ledger state was preserved."
+        ;;
     down)
         require_docker
         [[ -x "$NETWORK/network.sh" ]] || { echo "Fabric test network is not installed."; exit 0; }
@@ -85,7 +101,7 @@ case "$ACTION" in
         ./network.sh down
         ;;
     *)
-        echo "Usage: bash scripts/fabric.sh {install|up|upgrade|down}" >&2
+        echo "Usage: bash scripts/fabric.sh {install|up|upgrade|refresh|down}" >&2
         exit 2
         ;;
 esac

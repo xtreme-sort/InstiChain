@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-down fabric-test backend-test frontend-test test
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-refresh fabric-down fabric-test backend-test frontend-test test
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
@@ -19,6 +19,7 @@ help:
 	@echo "make fabric-install Download pinned Fabric runtime and samples"
 	@echo "make fabric-up      Start two-organization Fabric and deploy chaincode"
 	@echo "make fabric-upgrade Upgrade an existing JS chaincode deployment to Java"
+	@echo "make fabric-refresh FABRIC_SEQUENCE=N Upgrade an existing Java chaincode definition"
 	@echo "make fabric-down    Delete the local Fabric network and ledger"
 	@echo "make test           Run backend, chaincode, and frontend checks"
 
@@ -99,6 +100,9 @@ fabric-up:
 
 fabric-upgrade:
 	@bash scripts/fabric.sh upgrade
+
+fabric-refresh:
+	@FABRIC_SEQUENCE="$(FABRIC_SEQUENCE)" bash scripts/fabric.sh refresh
 
 fabric-down:
 	@bash scripts/fabric.sh down

@@ -30,6 +30,7 @@ public final class InstiChainContract implements ContractInterface {
     private static final String EVENT_PREFIX = "event:";
     private static final String HEAD_KEY = "ledger:head";
     private static final String REVOCATION_PREFIX = "revocation:";
+    private static final String CREDENTIAL_PREFIX = "credential:";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Map<String, String> REVOCATION_SUBJECTS = Map.of(
             "ROLE_REVOKED", "appointment_id",
@@ -77,7 +78,10 @@ public final class InstiChainContract implements ContractInterface {
             if (hasBytes(context.getStub().getState(REVOCATION_PREFIX + subjectId))) {
                 throw fail(subjectField + " " + subjectId + " is already revoked");
             }
-            if (!hasBytes(context.getStub().getState(EVENT_PREFIX + subjectId))) {
+            boolean grantingEventExists = "ACHIEVEMENT_REVOKED".equals(eventType)
+                    ? credentialExists(context, subjectId)
+                    : hasBytes(context.getStub().getState(EVENT_PREFIX + subjectId));
+            if (!grantingEventExists) {
                 throw fail(subjectField + " " + subjectId + " has no granting event to revoke");
             }
         }
@@ -98,6 +102,21 @@ public final class InstiChainContract implements ContractInterface {
         byte[] bytes = stringify(event).getBytes(StandardCharsets.UTF_8);
         context.getStub().putState(key, bytes);
         context.getStub().putState(sequenceKey(sequence), bytes);
+        if ("ACHIEVEMENT_ISSUED".equals(eventType)) {
+            JsonNode credentialIds = event.path("object_ids").path("credential_ids");
+            if (!credentialIds.isArray() || credentialIds.isEmpty()) {
+                throw fail("ACHIEVEMENT_ISSUED requires credential_ids");
+            }
+            for (JsonNode credentialId : credentialIds) {
+                String id = credentialId.asText();
+                requireUuid(id, "credential_ids must contain lowercase UUIDs");
+                if (hasBytes(context.getStub().getState(CREDENTIAL_PREFIX + id))) {
+                    throw fail("credential " + id + " was already issued");
+                }
+                context.getStub().putState(CREDENTIAL_PREFIX + id,
+                        requestId.getBytes(StandardCharsets.UTF_8));
+            }
+        }
         if (subjectField != null) {
             ObjectNode revocation = JSON.createObjectNode();
             revocation.put("subject_field", subjectField);
@@ -212,6 +231,22 @@ public final class InstiChainContract implements ContractInterface {
 
     private static boolean hasBytes(byte[] value) {
         return value != null && value.length > 0;
+    }
+
+    private boolean credentialExists(Context context, String credentialId) {
+        if (hasBytes(context.getStub().getState(CREDENTIAL_PREFIX + credentialId))) return true;
+        // Older issuance events predate the credential index; retain revocability.
+        try (QueryResultsIterator<KeyValue> entries = context.getStub()
+                .getStateByRange("sequence:", "sequence:\uffff")) {
+            for (KeyValue entry : entries) {
+                JsonNode event = parseObject(entry.getStringValue(), "stored event");
+                if (!"ACHIEVEMENT_ISSUED".equals(event.path("event_type").asText())) continue;
+                for (JsonNode id : event.path("object_ids").path("credential_ids")) {
+                    if (credentialId.equals(id.asText())) return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static String sequenceKey(long sequence) {
