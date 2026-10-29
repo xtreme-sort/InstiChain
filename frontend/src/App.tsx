@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Link2, RefreshCw, Settings2, ShieldCheck, UserRound } from 'lucide-react'
+import { Link2, RefreshCw, Settings2, ShieldCheck, Trophy, UserRound } from 'lucide-react'
 import EmailVerification from './EmailVerification'
 import AdminPanel from './AdminPanel'
 import AdvisorPanel from './AdvisorPanel'
+import CompetitionPanel from './CompetitionPanel'
+import type { OfficerClub } from './CompetitionPanel'
 import type { Account } from './EmailVerification'
 
 type Connection = 'checking' | 'connected' | 'unavailable'
-type Workspace = 'account' | 'admin' | 'advisor'
+type Workspace = 'account' | 'admin' | 'advisor' | 'competitions'
 
 export default function App() {
   const [connection, setConnection] = useState<Connection>('checking')
@@ -15,6 +17,7 @@ export default function App() {
   const [sessionChecked, setSessionChecked] = useState(false)
   const [workspace, setWorkspace] = useState<Workspace>('account')
   const [access, setAccess] = useState({ admin: false, advisor: false })
+  const [officerClubs, setOfficerClubs] = useState<OfficerClub[]>([])
   const [accessLoading, setAccessLoading] = useState(false)
   const [accessError, setAccessError] = useState('')
   const [linkMode, setLinkMode] = useState(
@@ -73,18 +76,24 @@ export default function App() {
     if (!account) {
       setWorkspace('account')
       setAccess({ admin: false, advisor: false })
+      setOfficerClubs([])
       return
     }
     let active = true
     setAccessLoading(true)
     setAccessError('')
-    void Promise.all(['/api/admin/access', '/api/advisor/access'].map(async (path) => {
+    const roles = Promise.all(['/api/admin/access', '/api/advisor/access'].map(async (path) => {
       const response = await fetch(path, { signal: AbortSignal.timeout(5000) })
       if (response.status === 403) return false
       if (!response.ok) throw new Error('Unable to check your workspace access.')
       return true
-    })).then(([admin, advisor]) => {
-      if (active) setAccess({ admin, advisor })
+    }))
+    const clubs = fetch('/api/officer/clubs', { signal: AbortSignal.timeout(5000) }).then(async (response) => {
+      if (!response.ok) throw new Error('Unable to check club officer access.')
+      return await response.json() as OfficerClub[]
+    })
+    void Promise.all([roles, clubs]).then(([[admin, advisor], assignedClubs]) => {
+      if (active) { setAccess({ admin, advisor }); setOfficerClubs(assignedClubs) }
     }).catch((cause) => {
       if (active) setAccessError(cause instanceof Error ? cause.message : 'Unable to check workspace access.')
     }).finally(() => { if (active) setAccessLoading(false) })
@@ -112,6 +121,10 @@ export default function App() {
             aria-current={workspace === 'advisor' ? 'page' : undefined} onClick={() => setWorkspace('advisor')}>
             <ShieldCheck size={17} aria-hidden="true" /> Advisor
           </button>}
+          {officerClubs.length > 0 && <button type="button" className={workspace === 'competitions' ? 'selected' : ''}
+            aria-current={workspace === 'competitions' ? 'page' : undefined} onClick={() => setWorkspace('competitions')}>
+            <Trophy size={17} aria-hidden="true" /> Competitions
+          </button>}
         </nav>}
         {accessLoading && <p role="status">Checking workspace access...</p>}
         {accessError && <p role="alert" className="unavailable">{accessError}</p>}
@@ -122,6 +135,8 @@ export default function App() {
         {account && !linkMode && workspace === 'admin' && access.admin && <AdminPanel key={account.id} />}
         {account && !linkMode && workspace === 'advisor' && access.advisor &&
           <AdvisorPanel key={`advisor-${account.id}`} userId={account.id} />}
+        {account && !linkMode && workspace === 'competitions' && officerClubs.length > 0 &&
+          <CompetitionPanel key={`competitions-${account.id}`} clubs={officerClubs} />}
         <h2>Service status</h2>
         <section className="service" aria-label="Backend connection">
           <span>InstiChain API</span>
