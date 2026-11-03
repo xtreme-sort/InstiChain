@@ -32,6 +32,7 @@ type HistoryItem = {
   committed_at: string
   reason: string | null
 }
+type ProofHealth = { archive_status: string; provider_status: string; checked_at: string | null; availability: string }
 
 function readable(value: string): string {
   return value.replaceAll('_', ' ')
@@ -42,6 +43,7 @@ export default function CredentialVault() {
   const [selectedId, setSelectedId] = useState('')
   const [verification, setVerification] = useState<Verification | null>(null)
   const [history, setHistory] = useState<HistoryItem[]>([])
+  const [proofHealth, setProofHealth] = useState<ProofHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState('')
@@ -65,11 +67,13 @@ export default function CredentialVault() {
     setDetailError('')
     setVerification(null)
     setHistory([])
+    setProofHealth(null)
     void Promise.all([
       apiRequest<Verification>(`credentials/${selectedId}/verification`),
       apiRequest<HistoryItem[]>(`credentials/${selectedId}/history`),
-    ]).then(([result, events]) => {
-      if (active) { setVerification(result); setHistory(events) }
+      apiRequest<ProofHealth>(`credentials/${selectedId}/proof-health`),
+    ]).then(([result, events, proof]) => {
+      if (active) { setVerification(result); setHistory(events); setProofHealth(proof) }
     }).catch((cause) => {
       if (active) setDetailError(cause instanceof Error ? cause.message : 'Unable to verify this credential.')
     }).finally(() => { if (active) setChecking(false) })
@@ -98,7 +102,7 @@ export default function CredentialVault() {
             <dt>Issued</dt><dd>{new Date(selected.issued_at).toLocaleString()}</dd>
             <dt>Result version</dt><dd>{selected.submission_version}</dd>
             <dt>Current status</dt><dd>{readable(selected.lifecycle_status)}</dd>
-            <dt>Proof</dt><dd>Digest only; file availability has not been checked</dd>
+            <dt>Proof</dt><dd>{proofHealth ? readable(proofHealth.availability) : 'Not checked'}</dd>
             <dt>SHA-256</dt><dd><code>{selected.proof_digest}</code></dd>
             <dt>Fabric transaction</dt><dd><code>{selected.fabric_transaction_id || 'Not available'}</code></dd></dl>
           {checking && <p role="status"><RefreshCw size={15} aria-hidden="true" /> Checking ledger...</p>}
@@ -111,6 +115,9 @@ export default function CredentialVault() {
               <dt>Lifecycle</dt><dd>{readable(verification.lifecycle_status)}</dd>
               <dt>Proof availability</dt><dd>{readable(verification.proof_availability)}</dd></dl>
             {verification.reason && <p>{verification.reason}</p>}
+            {proofHealth && proofHealth.availability !== 'digest_only' && <p>
+              Archived copy: {readable(proofHealth.archive_status)}; Drive file: {readable(proofHealth.provider_status)}.
+            </p>}
           </section>}
           <section className="vault-history" aria-label="Credential history"><h3>Ledger history</h3>
             {history.length === 0 ? <p>No verified history is available.</p> : <ol>{history.map((event) =>

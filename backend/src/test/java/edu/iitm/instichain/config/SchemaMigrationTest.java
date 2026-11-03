@@ -26,7 +26,7 @@ class SchemaMigrationTest {
                 .dataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration")
                 .load();
-        assertEquals(5, flyway.migrate().migrationsExecuted);
+        assertEquals(6, flyway.migrate().migrationsExecuted);
 
         Set<String> expected = Set.of("users", "email_verifications", "sessions", "administrator",
                 "authority_keys", "clubs", "appointments", "competitions", "competition_results",

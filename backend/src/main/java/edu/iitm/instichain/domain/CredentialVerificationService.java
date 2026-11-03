@@ -69,10 +69,11 @@ public class CredentialVerificationService {
 
     public Verification verify(Subject subject) {
         String lifecycle = statuses.current(subject.revokedAt(), subject.superseded());
+        String proof = proofAvailability(subject.id());
         Receipt issuance = receipt(subject.issuanceId());
         if (issuance == null || !"fabric".equals(issuance.source())) {
             return new Verification(subject.id(), "unknown", "missing_receipt", "unknown",
-                    lifecycle, "digest_only", "Issuance receipt is missing or legacy.");
+                    lifecycle, proof, "Issuance receipt is missing or legacy.");
         }
         byte[] publicKey = advisorPublicKey(issuance.keyId());
         String signature = signatureStatus(issuance, publicKey);
@@ -92,7 +93,7 @@ public class CredentialVerificationService {
             }
         }
         return new Verification(subject.id(), authenticity, ledger, authorization,
-                lifecycle, "digest_only", null);
+                lifecycle, proof, null);
     }
 
     public List<HistoryItem> history(Subject subject) {
@@ -120,6 +121,18 @@ public class CredentialVerificationService {
                 FROM fabric_transactions WHERE request_id = ?
                 """, CredentialVerificationService::mapReceipt, id);
         return rows.isEmpty() ? null : rows.getFirst();
+    }
+
+    private String proofAvailability(UUID credentialId) {
+        List<String> statuses = jdbc.queryForList("""
+                SELECT COALESCE(p.availability, 'digest_only')
+                FROM credentials cr
+                JOIN result_submissions s ON s.result_id = cr.result_id
+                    AND s.version = cr.submission_version
+                LEFT JOIN proof_artifacts p ON p.id = s.proof_artifact_id
+                WHERE cr.id = ?
+                """, String.class, credentialId);
+        return statuses.isEmpty() || statuses.getFirst() == null ? "digest_only" : statuses.getFirst();
     }
 
     private static Receipt mapReceipt(ResultSet row, int number) throws SQLException {

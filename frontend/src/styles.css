@@ -183,6 +183,14 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .vault-history ol { padding-left: 22px; }
 .vault-history li { padding: 7px 0; overflow-wrap: anywhere; }
 .vault-history li span { display: block; color: #67716c; font-size: 13px; }
+.proof-mode { display: inline-flex; border: 1px solid #b6c4bc; border-radius: 6px; overflow: hidden; margin: 20px 0 12px; }
+.proof-mode button { width: auto; height: 38px; padding: 0 12px; border: 0; border-radius: 0; font: inherit; font-size: 13px; }
+.proof-mode button.selected { color: #fff; background: #166c52; }
+.proof-library { padding: 14px 0; border-top: 1px solid #dce3df; }
+.proof-library h3 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.proof-library button { width: auto; height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: inherit; font-size: 14px; }
+.proof-import, .proof-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; margin: 14px 0; }
+.proof-connection { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 @media (max-width: 600px) {
   .admin-forms { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .advisor-row { grid-template-columns: minmax(0, 1fr); }

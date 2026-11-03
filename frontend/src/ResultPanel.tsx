@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Pencil, Plus } from 'lucide-react'
 import { apiRequest, postJson } from './api'
+import ProofLibrary from './ProofLibrary'
 
 export type Submission = {
   id: string
@@ -10,6 +11,8 @@ export type Submission = {
   version: number
   award: string
   proof_digest: string
+  proof_artifact_id: string | null
+  proof_source: 'manual_digest' | 'archived_file'
   submitted_by_name: string
   submitted_at: string
   recipients: { id: string; email: string; display_name: string }[]
@@ -24,6 +27,8 @@ export default function ResultPanel({ clubId, competitionId }: Props) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [proofMode, setProofMode] = useState<'archived' | 'manual'>('archived')
+  const [proofArtifactId, setProofArtifactId] = useState('')
   const base = `clubs/${clubId}/competitions/${competitionId}/results`
 
   useEffect(() => {
@@ -46,7 +51,12 @@ export default function ResultPanel({ clubId, competitionId }: Props) {
     const award = String(fields.get('award') || '').trim()
     const digest = String(fields.get('proof_digest') || '').trim().toLowerCase()
     const emails = String(fields.get('recipient_emails') || '').split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean)
-    if (!/^[0-9a-f]{64}$/.test(digest)) { setError('Enter a 64-character SHA-256 digest.'); return }
+    if (proofMode === 'manual' && !/^[0-9a-f]{64}$/.test(digest)) {
+      setError('Enter a 64-character SHA-256 digest.'); return
+    }
+    if (proofMode === 'archived' && !proofArtifactId) {
+      setError('Choose an archived proof.'); return
+    }
     if (!emails.length || new Set(emails.map((value) => value.toLowerCase())).size !== emails.length) {
       setError('Enter at least one unique recipient email.'); return
     }
@@ -56,10 +66,13 @@ export default function ResultPanel({ clubId, competitionId }: Props) {
     try {
       const path = correcting ? `${base}/${correcting}/versions` : base
       const created = await postJson<Submission>(path, {
-        award, proof_digest: digest, recipient_emails: emails,
+        award, proof_digest: proofMode === 'manual' ? digest : null,
+        proof_artifact_id: proofMode === 'archived' ? proofArtifactId : null,
+        recipient_emails: emails,
       })
       setSubmissions((current) => [...current, created])
       setCorrecting(null)
+      setProofArtifactId('')
       setMessage(`Result version ${created.version} recorded.`)
       form.reset()
     } catch (cause) {
@@ -85,19 +98,30 @@ export default function ResultPanel({ clubId, competitionId }: Props) {
           {submissions.filter((version) => version.result_id === row.result_id).map((version) =>
             <p key={version.id}>Version {version.version}: {version.award} | SHA-256 <code>{version.proof_digest}</code></p>)}
         </details>
-        <button type="button" className="text-command" onClick={() => setCorrecting(row.result_id)}>
+        <button type="button" className="text-command" onClick={() => {
+          setCorrecting(row.result_id)
+          setProofMode(row.proof_artifact_id ? 'archived' : 'manual')
+          setProofArtifactId(row.proof_artifact_id || '')
+        }}>
           <Pencil size={16} aria-hidden="true" />Correct result
         </button>
       </li>)}</ul>}
+    <div className="proof-mode" role="group" aria-label="Proof source">
+      <button type="button" className={proofMode === 'archived' ? 'selected' : ''}
+        aria-pressed={proofMode === 'archived'} onClick={() => setProofMode('archived')}>Archived proof</button>
+      <button type="button" className={proofMode === 'manual' ? 'selected' : ''}
+        aria-pressed={proofMode === 'manual'} onClick={() => setProofMode('manual')}>Manual digest</button>
+    </div>
+    {proofMode === 'archived' && <ProofLibrary selectedId={proofArtifactId} onSelect={setProofArtifactId} />}
     <form key={correcting || 'new'} className="workflow-form" onSubmit={(event) => void submit(event)}>
       <h3>{correcting ? 'Submit corrected version' : 'Submit result'}</h3>
       <fieldset disabled={pending}>
         <label>Award<input name="award" required maxLength={250} defaultValue={source?.award || ''} /></label>
-        <label>Proof SHA-256 digest<input name="proof_digest" required minLength={64} maxLength={64}
-          pattern="[0-9a-fA-F]{64}" defaultValue={source?.proof_digest || ''} /></label>
+        {proofMode === 'manual' && <label>Proof SHA-256 digest<input name="proof_digest" required minLength={64} maxLength={64}
+          pattern="[0-9a-fA-F]{64}" defaultValue={source?.proof_digest || ''} /></label>}
         <label className="full-width">Verified recipient emails<textarea name="recipient_emails" required rows={2}
           defaultValue={source?.recipients.map((recipient) => recipient.email).join('\n') || ''} /></label>
-        <p className="full-width">Enter the SHA-256 digest of your supporting file. File upload and verification are not yet available.</p>
+        {proofMode === 'manual' && <p className="full-width">This digest has not been verified against an uploaded file.</p>}
         <button className="primary" type="submit">{correcting ? <Pencil size={18} aria-hidden="true" /> : <Plus size={18} aria-hidden="true" />}
           {correcting ? 'Submit correction' : 'Submit result'}</button>
       </fieldset>
