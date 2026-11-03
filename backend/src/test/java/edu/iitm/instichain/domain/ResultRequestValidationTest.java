@@ -12,12 +12,12 @@ class ResultRequestValidationTest {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             var validator = factory.getValidator();
             assertTrue(validator.validate(new ResultController.SubmissionRequest(
-                    "First place", "a".repeat(64), List.of("student@smail.iitm.ac.in"))).isEmpty());
+                    "First place", "a".repeat(64), null, List.of("student@smail.iitm.ac.in"))).isEmpty());
             assertTrue(validator.validate(new ResultController.SubmissionRequest(
-                    "First place", null, List.of("student@smail.iitm.ac.in"))).stream()
-                    .anyMatch(violation -> violation.getPropertyPath().toString().equals("proofDigest")));
+                    "First place", null, null, List.of("student@smail.iitm.ac.in"))).stream()
+                    .anyMatch(violation -> violation.getPropertyPath().toString().equals("proofSelectionValid")));
             assertTrue(validator.validate(new ResultController.SubmissionRequest(
-                    "First place", "not-a-digest", List.of("student@smail.iitm.ac.in"))).stream()
+                    "First place", "not-a-digest", null, List.of("student@smail.iitm.ac.in"))).stream()
                     .anyMatch(violation -> violation.getPropertyPath().toString().equals("proofDigest")));
         }
     }

@@ -5,8 +5,10 @@ import edu.iitm.instichain.auth.InstituteEmail;
 import edu.iitm.instichain.auth.UserAccount;
 import edu.iitm.instichain.common.ApiException;
 import edu.iitm.instichain.common.UuidV5;
+import edu.iitm.instichain.storage.StorageRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Pattern;
@@ -34,20 +36,29 @@ public class ResultController {
     private static final Set<String> OFFICERS = Set.of("club_head", "office_bearer");
     private final JdbcTemplate jdbc;
     private final AccessService access;
+    private final StorageRepository storage;
 
-    public ResultController(JdbcTemplate jdbc, AccessService access) {
+    public ResultController(JdbcTemplate jdbc, AccessService access, StorageRepository storage) {
         this.jdbc = jdbc;
         this.access = access;
+        this.storage = storage;
     }
 
     record SubmissionRequest(@NotBlank @Size(max = 250) String award,
                              @JsonProperty("proof_digest")
-                             @NotBlank @Pattern(regexp = "^[0-9a-f]{64}$") String proofDigest,
+                             @Pattern(regexp = "^[0-9a-f]{64}$") String proofDigest,
+                             @JsonProperty("proof_artifact_id") UUID proofArtifactId,
                              @JsonProperty("recipient_emails")
-                             @NotEmpty @Size(max = 100) List<@NotBlank String> recipientEmails) {}
+                             @NotEmpty @Size(max = 100) List<@NotBlank String> recipientEmails) {
+        @AssertTrue(message = "Provide exactly one proof source")
+        public boolean isProofSelectionValid() {
+            return (proofDigest == null) != (proofArtifactId == null);
+        }
+    }
     record Recipient(UUID id, String email, String displayName) {}
     record Submission(UUID id, UUID resultId, UUID competitionId, int version, String award,
-                      String proofDigest, UUID submittedById, String submittedByName,
+                      String proofDigest, UUID proofArtifactId, String proofSource,
+                      UUID submittedById, String submittedByName,
                       OffsetDateTime submittedAt, List<Recipient> recipients) {}
 
     @GetMapping
@@ -113,6 +124,18 @@ public class ResultController {
     }
 
     private Submission save(UUID resultId, int version, SubmissionRequest body, UserAccount submitter) {
+        if ((body.proofArtifactId() == null) == (body.proofDigest() == null)) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Provide either a verified proof artifact or a manual SHA-256 digest.");
+        }
+        String proofDigest = body.proofDigest();
+        if (body.proofArtifactId() != null) {
+            StorageRepository.Artifact artifact = storage.ownedArtifact(submitter.id(), body.proofArtifactId());
+            if (!java.nio.file.Files.isRegularFile(java.nio.file.Path.of(artifact.archivePath()))) {
+                throw new ApiException(HttpStatus.CONFLICT, "The archived proof is unavailable.");
+            }
+            proofDigest = artifact.digest();
+        }
         List<String> emails = body.recipientEmails().stream().map(value -> {
             try { return InstituteEmail.normalize(value); }
             catch (IllegalArgumentException error) {
@@ -137,10 +160,11 @@ public class ResultController {
         }
         UUID submissionId = UuidV5.url("instichain:result-submission:" + resultId + ":" + version);
         jdbc.update("""
-                INSERT INTO result_submissions(id, result_id, version, award, proof_digest, submitted_by_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO result_submissions(id, result_id, version, award, proof_digest,
+                                               proof_artifact_id, submitted_by_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, submissionId, resultId, version, body.award().strip(),
-                body.proofDigest(), submitter.id());
+                proofDigest, body.proofArtifactId(), submitter.id());
         recipients.forEach(recipient -> jdbc.update(
                 "INSERT INTO result_recipients(submission_id, recipient_id) VALUES (?, ?)",
                 submissionId, recipient.id()));
@@ -156,6 +180,8 @@ public class ResultController {
                 """, (result, row) -> new Submission(result.getObject("id", UUID.class),
                 result.getObject("result_id", UUID.class), result.getObject("competition_id", UUID.class),
                 result.getInt("version"), result.getString("award"), result.getString("proof_digest"),
+                result.getObject("proof_artifact_id", UUID.class),
+                result.getObject("proof_artifact_id", UUID.class) == null ? "manual_digest" : "archived_file",
                 result.getObject("submitted_by_id", UUID.class), result.getString("submitted_by_name"),
                 result.getObject("submitted_at", OffsetDateTime.class), List.of()), id).getFirst();
         List<Recipient> recipients = jdbc.query("""
@@ -165,7 +191,8 @@ public class ResultController {
                 """, (result, row) -> new Recipient(result.getObject("id", UUID.class),
                 result.getString("email"), result.getString("display_name")), id);
         return new Submission(base.id(), base.resultId(), base.competitionId(), base.version(),
-                base.award(), base.proofDigest(), base.submittedById(), base.submittedByName(),
+                base.award(), base.proofDigest(), base.proofArtifactId(), base.proofSource(),
+                base.submittedById(), base.submittedByName(),
                 base.submittedAt(), recipients);
     }
 
