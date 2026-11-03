@@ -20,7 +20,13 @@ public record InstiChainProperties(
         @Valid Fabric fabric,
         Path adminSigningKeyFile,
         String driveTestAccessToken,
-        String driveTestFileId) {
+        String driveTestFileId,
+        String proofEncryptionKey,
+        Path proofArchiveDirectory,
+        @Min(1) long maxProofBytes,
+        String googleClientId,
+        String googleClientSecret,
+        String googleRedirectUri) {
 
     public record Smtp(@NotBlank String host, @Min(1) @Max(65535) int port,
                        @NotBlank String security, String username,

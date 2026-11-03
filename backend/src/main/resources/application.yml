@@ -33,6 +33,12 @@ instichain:
   admin-signing-key-file: ${INSTICHAIN_ADMIN_SIGNING_KEY_FILE:}
   drive-test-access-token: ${INSTICHAIN_DRIVE_TEST_ACCESS_TOKEN:}
   drive-test-file-id: ${INSTICHAIN_DRIVE_TEST_FILE_ID:}
+  proof-encryption-key: ${INSTICHAIN_PROOF_ENCRYPTION_KEY:}
+  proof-archive-directory: ${INSTICHAIN_PROOF_ARCHIVE_DIRECTORY:./.private/proofs}
+  max-proof-bytes: ${INSTICHAIN_MAX_PROOF_BYTES:20971520}
+  google-client-id: ${INSTICHAIN_GOOGLE_CLIENT_ID:}
+  google-client-secret: ${INSTICHAIN_GOOGLE_CLIENT_SECRET:}
+  google-redirect-uri: ${INSTICHAIN_GOOGLE_REDIRECT_URI:http://127.0.0.1:8000/api/storage/google/callback}
   smtp:
     host: ${INSTICHAIN_SMTP_HOST:127.0.0.1}
     port: ${INSTICHAIN_SMTP_PORT:1025}

@@ -22,6 +22,7 @@ __pycache__/
 .agents/
 .codex/
 .keys/
+.private/
 
 # Downloaded Hyperledger Fabric runtime, identities and channel artifacts
 fabric/runtime/
