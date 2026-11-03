@@ -4,7 +4,7 @@ This is the implementation plan for the current **Java/Spring Boot + Hyperledger
 
 ## Progress
 
-Commits **1.1 through 2.4 are implemented locally**. Twelve planned commits remain, starting at **3.1**. The credential revocation contract change in 2.2 requires `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. The current UI does not yet include a credential-revocation control, and live end-to-end Fabric tests remain pending.
+Commits **1.1 through 4.2 are implemented locally**. Six planned commits remain, starting at **4.3**. The credential revocation contract change in 2.2 requires `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. The current UI does not yet include a credential-revocation control, and live end-to-end Fabric tests remain pending.
 
 ## What Is Implemented Now
 
@@ -19,6 +19,8 @@ Commits **1.1 through 2.4 are implemented locally**. Twelve planned commits rema
 | Achievement issuance | Backend prepare/submit API and advisor UI for locally signed credential issuance | `IssuanceController.java`, `frontend/src/IssuancePanel.tsx` |
 | Credential lifecycle | Student list/detail/vault, signed revocation API, historical verification and history APIs | `StudentCredentialController.java`, `CredentialRevocationController.java`, `CredentialVerificationService.java`, `frontend/src/CredentialVault.tsx` |
 | Fabric ledger | Java chaincode, direct Fabric Gateway client, confirmed-write receipts, event and revocation inspection endpoints | `fabric/chaincode/`, `backend/src/main/java/edu/iitm/instichain/fabric/` |
+| Proof storage | Private proof archive, Google Drive OAuth/import, server-side SHA-256 binding, proof-health checks and UI | `backend/src/main/java/edu/iitm/instichain/storage/`, `frontend/src/ProofLibrary.tsx` |
+| Selective sharing | Student-owned hashed share tokens, bounded expiry, authenticated create/list/revoke APIs | `backend/src/main/java/edu/iitm/instichain/sharing/` |
 
 The repository currently has **no Ethereum runtime**. Existing unit tests and builds have passed, but a full browser-to-Fabric end-to-end run has not been demonstrated by the test suite.
 
@@ -86,7 +88,7 @@ Add a student-facing React vault using the credential list/detail and timeline A
 
 ## Priority 3: Private Proof Storage And Google Drive
 
-Google Drive currently has only an access preflight, not OAuth, file import, archival, or retrieval.
+Google Drive connection, import, archival, and proof-health checks are implemented. Live provider testing still requires configured OAuth credentials and a test account.
 
 ### Commit 3.1 - Storage foundation
 
