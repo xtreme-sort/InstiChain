@@ -259,3 +259,5 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .recovery-list small, .recovery-list span { color: #67716c; font-size: 13px; }
 .recovery-list code { overflow-wrap: anywhere; font-size: 12px; }
 .revocation-review { margin-top: 16px; padding: 14px; border: 1px solid #e6c3c8; border-radius: 6px; background: #fbf3f4; }
+.issued-credentials { list-style: none; padding: 0; margin: 10px 0 0; }
+.issued-credentials li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid #dce3df; font-size: 14px; }

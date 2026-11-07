@@ -27,6 +27,7 @@ public final class OperatorCli {
     private OperatorCli() {}
 
     public static void main(String[] args) {
+        InstiChainApplication.useUtc();
         try {
             if (args.length == 2 && "keygen".equals(args[0])) {
                 keygen(Path.of(args[1]));

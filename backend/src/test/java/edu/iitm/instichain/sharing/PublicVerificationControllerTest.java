@@ -25,7 +25,7 @@ class PublicVerificationControllerTest {
     @Test
     void responsesAreNeverCached() {
         PublicVerificationController controller =
-                new PublicVerificationController(service, new PublicRateLimiter());
+                new PublicVerificationController(service, new PublicRateLimiter(PublicRateLimiter.DEFAULT_LIMIT_PER_MINUTE));
         String token = "b".repeat(43);
         var result = new PublicVerificationService.Result(null, "Student", null, List.of());
         when(service.verify(token)).thenReturn(result);
@@ -40,9 +40,9 @@ class PublicVerificationControllerTest {
     void rateLimitIsEnforcedBeforeAnyLookup() {
         Clock fixed = Clock.fixed(Instant.parse("2026-11-07T10:00:00Z"), ZoneOffset.UTC);
         PublicVerificationController controller =
-                new PublicVerificationController(service, new PublicRateLimiter(fixed));
+                new PublicVerificationController(service, new PublicRateLimiter(PublicRateLimiter.DEFAULT_LIMIT_PER_MINUTE, fixed));
         String token = "c".repeat(43);
-        for (int attempt = 0; attempt < PublicRateLimiter.LIMIT_PER_MINUTE; attempt++) {
+        for (int attempt = 0; attempt < PublicRateLimiter.DEFAULT_LIMIT_PER_MINUTE; attempt++) {
             controller.verify(new PublicVerificationController.VerifyRequest(token), request, response);
         }
         ApiException error = assertThrows(ApiException.class, () -> controller.verify(
@@ -55,12 +55,12 @@ class PublicVerificationControllerTest {
     void limitIsPerClientAndResetsAfterTheWindow() {
         Instant start = Instant.parse("2026-11-07T10:00:00Z");
         Clock[] clock = {Clock.fixed(start, ZoneOffset.UTC)};
-        PublicRateLimiter limiter = new PublicRateLimiter(new Clock() {
+        PublicRateLimiter limiter = new PublicRateLimiter(PublicRateLimiter.DEFAULT_LIMIT_PER_MINUTE, new Clock() {
             @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
             @Override public Clock withZone(java.time.ZoneId zone) { return this; }
             @Override public Instant instant() { return clock[0].instant(); }
         });
-        for (int attempt = 0; attempt < PublicRateLimiter.LIMIT_PER_MINUTE; attempt++) limiter.check("1.1.1.1");
+        for (int attempt = 0; attempt < PublicRateLimiter.DEFAULT_LIMIT_PER_MINUTE; attempt++) limiter.check("1.1.1.1");
         assertThrows(ApiException.class, () -> limiter.check("1.1.1.1"));
         limiter.check("2.2.2.2");
         clock[0] = Clock.fixed(start.plusSeconds(61), ZoneOffset.UTC);

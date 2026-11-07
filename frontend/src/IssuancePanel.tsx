@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BadgeCheck } from 'lucide-react'
+import { BadgeCheck, ListChecks, XCircle } from 'lucide-react'
 import { apiRequest, postJson } from './api'
 import { signPreparedPayload } from './signingKeyStore'
 import type { Competition } from './CompetitionPanel'
@@ -11,6 +11,7 @@ type Issued = {
   issued_at: string
   credentials: { id: string; recipient_id: string; award: string; submission_version: number }[]
 }
+type IssuedCredential = { id: string; recipient_name: string; issued_at: string; revoked_at: string | null }
 
 export default function IssuancePanel({ clubId, userId }: { clubId: string; userId: string }) {
   const [competitions, setCompetitions] = useState<Competition[]>([])
@@ -20,6 +21,8 @@ export default function IssuancePanel({ clubId, userId }: { clubId: string; user
   const [pendingId, setPendingId] = useState('')
   const [error, setError] = useState('')
   const [issued, setIssued] = useState<Issued | null>(null)
+  const [issuedFor, setIssuedFor] = useState<Record<string, IssuedCredential[]>>({})
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     let active = true
@@ -63,6 +66,37 @@ export default function IssuancePanel({ clubId, userId }: { clubId: string; user
     } finally { setPendingId('') }
   }
 
+  function basePath(row: Submission): string {
+    return `clubs/${clubId}/competitions/${competitionId}/results/${row.result_id}/versions/${row.version}`
+  }
+
+  async function showIssued(row: Submission) {
+    setError('')
+    try {
+      const rows = await apiRequest<IssuedCredential[]>(`${basePath(row)}/issuance`)
+      setIssuedFor((current) => ({ ...current, [row.id]: rows }))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load issued credentials.')
+    }
+  }
+
+  /** Revocation is signed in the browser like issuance; the original issuance stays on the ledger. */
+  async function revoke(row: Submission, credential: IssuedCredential) {
+    const reason = window.prompt(`Reason for revoking ${credential.recipient_name}'s credential (recorded on the ledger):`)?.trim()
+    if (!reason) return
+    const path = `clubs/${clubId}/credentials/${credential.id}/revocations`
+    setPendingId(credential.id); setError(''); setNotice('')
+    try {
+      const prepared = await postJson<Prepared>(`${path}/prepare`, { reason })
+      const signature = await signPreparedPayload(userId, prepared.signing_payload)
+      await postJson(path, { document: prepared.document, signature })
+      setNotice(`Revoked ${credential.recipient_name}'s credential. Verifiers see this immediately.`)
+      await showIssued(row)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to revoke the credential.')
+    } finally { setPendingId('') }
+  }
+
   const latest = submissions.filter((submission) => !submissions.some((other) =>
     other.result_id === submission.result_id && other.version > submission.version))
   return <section className="issuance-panel" aria-labelledby="issuance-title">
@@ -71,6 +105,7 @@ export default function IssuancePanel({ clubId, userId }: { clubId: string; user
       {competitions.map((competition) => <option key={competition.id} value={competition.id}>{competition.title}</option>)}
     </select></label>
     {error && <p role="alert" className="unavailable">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
     {loading ? <p role="status">Loading results...</p> : !competitionId ? <p>No competitions are available.</p> :
       latest.length === 0 ? <p>No results have been submitted for this competition.</p> :
         <ul className="issuance-list">{latest.map((row) => <li key={row.id}>
@@ -80,6 +115,17 @@ export default function IssuancePanel({ clubId, userId }: { clubId: string; user
           <button type="button" disabled={Boolean(pendingId)} onClick={() => void issue(row)}>
             <BadgeCheck size={17} aria-hidden="true" />{pendingId === row.id ? 'Issuing...' : 'Review and sign issuance'}
           </button>
+          <button type="button" disabled={Boolean(pendingId)} onClick={() => void showIssued(row)}>
+            <ListChecks size={17} aria-hidden="true" /> Issued credentials</button>
+          {issuedFor[row.id] && (issuedFor[row.id].length === 0 ? <p>Not issued yet.</p> :
+            <ul className="issued-credentials">{issuedFor[row.id].map((credential) => <li key={credential.id}>
+              <span>{credential.recipient_name}</span>
+              <span className={credential.revoked_at ? 'unavailable' : 'connected'}>
+                {credential.revoked_at ? `Revoked ${new Date(credential.revoked_at).toLocaleString()}` : 'Active'}</span>
+              {!credential.revoked_at && <button type="button" disabled={Boolean(pendingId)}
+                onClick={() => void revoke(row, credential)} aria-label={`Revoke ${credential.recipient_name}'s credential`}>
+                <XCircle size={16} aria-hidden="true" />{pendingId === credential.id ? 'Revoking...' : 'Revoke'}</button>}
+            </li>)}</ul>)}
         </li>)}</ul>}
     {issued && <div role="status" className="issuance-confirmation">
       <strong>Fabric confirmed the issuance.</strong>

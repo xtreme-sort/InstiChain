@@ -25,6 +25,11 @@ fabric/chaincode/        Hyperledger Fabric Java smart contract
 frontend/                React and TypeScript browser client
 scripts/                 Development and Fabric lifecycle commands
 docs/ARCHITECTURE.md     System design and source-code map
+docs/DEMO.md             Demo runbook, troubleshooting, production assumptions
+docs/SECURITY.md         Security review and known limitations
+docs/KEY_LIFECYCLE.md    Signing-key rotation, recovery and compromise policy
+docs/LEDGER_AUDIT.md     Fabric checkpoints and projection audit
+docs/RECOVERY.md         Backup, restore and end-to-end testing
 compose.yaml             PostgreSQL and Mailpit
 Makefile                 Common local commands
 ```
@@ -135,6 +140,10 @@ make backend-test
 make fabric-test
 make frontend-test
 ```
+
+`make e2e` runs the full workflow against a running stack, including Fabric; see
+[docs/RECOVERY.md](docs/RECOVERY.md). If something fails to start, see the
+troubleshooting table in [docs/DEMO.md](docs/DEMO.md).
 
 ## Configuration
 

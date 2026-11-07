@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 public class KeyLifecycleService {
     static final String RECOVERY_PURPOSE = "instichain-key-recovery";
     static final long RECOVERY_HOURS = 72;
+    static final int RECOVERY_REQUESTS_PER_DAY = 5;
     private final KeyRepository keys;
     private final LedgerEventService ledger;
     private final CanonicalJson json;
@@ -109,6 +110,9 @@ public class KeyLifecycleService {
     }
 
     public Recovery requestRecovery(UUID userId, String encodedKey, String encodedProof) {
+        if (keys.recoveryRequestsToday(userId) >= RECOVERY_REQUESTS_PER_DAY) {
+            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Too many recovery requests today. Contact the administrator.");
+        }
         byte[] newKey = decode(encodedKey);
         if (!Ed25519.verify(newKey, recoveryProof(userId, encodedKey), signature(encodedProof))) {
             throw invalid("The new key did not prove possession.");

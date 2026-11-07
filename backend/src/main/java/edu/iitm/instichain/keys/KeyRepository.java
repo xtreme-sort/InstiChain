@@ -117,6 +117,14 @@ public class KeyRepository {
                 """, cancelledBy, userId);
     }
 
+    public int recoveryRequestsToday(UUID userId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT count(*) FROM key_recovery_requests
+                WHERE user_id = ? AND created_at > clock_timestamp() - interval '1 day'
+                """, Integer.class, userId);
+        return count == null ? 0 : count;
+    }
+
     public void insertRecovery(UUID id, UUID userId, byte[] publicKey, OffsetDateTime expiresAt) {
         jdbc.update("""
                 INSERT INTO key_recovery_requests(id, user_id, public_key, expires_at)

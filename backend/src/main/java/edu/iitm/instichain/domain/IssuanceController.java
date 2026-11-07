@@ -23,6 +23,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -56,6 +57,28 @@ public class IssuanceController {
     record Credential(UUID id, UUID recipientId, String award, String proofDigest,
                       int submissionVersion, UUID supersedesId, UUID transactionId,
                       OffsetDateTime issuedAt) {}
+
+    /** Issued credentials for a result version, so an advisor can review and revoke them later. */
+    @GetMapping("/{resultId}/versions/{version}/issuance")
+    List<Map<String, Object>> issued(@PathVariable UUID clubId, @PathVariable UUID competitionId,
+                                     @PathVariable UUID resultId, @PathVariable int version,
+                                     HttpServletRequest request) {
+        access.club(request, clubId, ADVISOR);
+        submission(clubId, competitionId, resultId, version);
+        return jdbc.query("""
+                SELECT cr.id, cr.recipient_id, u.display_name, cr.issued_at, cr.revoked_at
+                FROM credentials cr JOIN users u ON u.id = cr.recipient_id
+                WHERE cr.result_id = ? AND cr.submission_version = ? ORDER BY u.display_name, cr.id
+                """, (row, number) -> {
+            Map<String, Object> credential = new LinkedHashMap<>();
+            credential.put("id", row.getObject("id", UUID.class));
+            credential.put("recipient_id", row.getObject("recipient_id", UUID.class));
+            credential.put("recipient_name", row.getString("display_name"));
+            credential.put("issued_at", row.getObject("issued_at", OffsetDateTime.class));
+            credential.put("revoked_at", row.getObject("revoked_at", OffsetDateTime.class));
+            return credential;
+        }, resultId, version);
+    }
 
     @PostMapping("/{resultId}/versions/{version}/issuance/prepare")
     Map<String, Object> prepare(@PathVariable UUID clubId, @PathVariable UUID competitionId,

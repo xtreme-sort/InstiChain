@@ -4,7 +4,7 @@ This is the implementation plan for the current **Java/Spring Boot + Hyperledger
 
 ## Progress
 
-Commits **1.1 through 4.2 are implemented locally**. Six planned commits remain, starting at **4.3**. The credential revocation contract change in 2.2 requires `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. The current UI does not yet include a credential-revocation control, and live end-to-end Fabric tests remain pending.
+All planned commits, **1.1 through 5.4, are implemented**. The chaincode changes in 2.2 and 5.1 require `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. Still outstanding: a run of `make e2e` and the load test against a live Fabric network, and a manual pass through the screens. Current results are in `docs/DEMO.md`.
 
 ## What Is Implemented Now
 

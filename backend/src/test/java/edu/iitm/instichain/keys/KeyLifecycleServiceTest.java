@@ -165,6 +165,16 @@ class KeyLifecycleServiceTest {
         verify(keys).cancelPendingRecovery(userId, userId);
     }
 
+    @Test
+    void recoveryRequestsAreRateLimited() throws Exception {
+        when(keys.recoveryRequestsToday(userId)).thenReturn(KeyLifecycleService.RECOVERY_REQUESTS_PER_DAY);
+        byte[] proof = service.recoveryProof(userId, newPublic);
+        ApiException error = assertThrows(ApiException.class,
+                () -> service.requestRecovery(userId, newPublic, sign(newPrivate, proof)));
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, error.status());
+        verify(keys, never()).insertRecovery(any(), any(), any(), any());
+    }
+
     private AccessService.Administrator admin() {
         return new AccessService.Administrator(new UserAccount(UUID.randomUUID(), "admin@iitm.ac.in",
                 "Admin", now), UUID.randomUUID(), new byte[32]);
