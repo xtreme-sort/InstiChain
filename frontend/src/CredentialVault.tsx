@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BadgeCheck, RefreshCw } from 'lucide-react'
 import { apiRequest } from './api'
+import ShareManager from './ShareManager'
 
 type Credential = {
   id: string
@@ -128,5 +129,6 @@ export default function CredentialVault() {
           </section>
         </article>}
       </div>}
+    {!loading && credentials.length > 0 && <ShareManager credentials={credentials} />}
   </section>
 }

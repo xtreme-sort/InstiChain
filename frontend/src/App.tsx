@@ -5,6 +5,7 @@ import AdminPanel from './AdminPanel'
 import AdvisorPanel from './AdvisorPanel'
 import CompetitionPanel from './CompetitionPanel'
 import CredentialVault from './CredentialVault'
+import PublicVerifier from './PublicVerifier'
 import type { OfficerClub } from './CompetitionPanel'
 import type { Account } from './EmailVerification'
 
@@ -12,6 +13,23 @@ type Connection = 'checking' | 'connected' | 'unavailable'
 type Workspace = 'account' | 'admin' | 'advisor' | 'competitions' | 'credentials'
 
 export default function App() {
+  // Verifiers have no account, so the public route skips session and role checks entirely.
+  if (window.location.pathname === '/verify') return <PublicApp />
+  return <SignedInApp />
+}
+
+function PublicApp() {
+  return <>
+    <header className="header">
+      <Link2 size={26} aria-hidden="true" />
+      <span className="brand">InstiChain</span>
+      <span className="version">Verifier</span>
+    </header>
+    <main><PublicVerifier /></main>
+  </>
+}
+
+function SignedInApp() {
   const [connection, setConnection] = useState<Connection>('checking')
   const [attempt, setAttempt] = useState(0)
   const [account, setAccount] = useState<Account | null>(null)
