@@ -76,7 +76,10 @@ public class AdminController {
         clubs.forEach(club -> byId.put((UUID) club.get("id"), club));
         jdbc.query("""
                 SELECT a.id, a.club_id, a.starts_at, a.ends_at, a.revoked_at,
-                       u.email, u.display_name, clock_timestamp() AS now
+                       u.email, u.display_name, clock_timestamp() AS now,
+                       (SELECT k.id FROM authority_keys k WHERE k.user_id = a.user_id
+                          AND k.purpose = 'advisor' AND k.revoked_at IS NULL
+                        ORDER BY k.created_at DESC, k.id LIMIT 1) AS current_key_id
                 FROM appointments a JOIN users u ON u.id = a.user_id
                 WHERE a.position = 'faculty_advisor' ORDER BY a.starts_at
                 """, result -> {
@@ -93,6 +96,8 @@ public class AdminController {
                         Map.entry("email", result.getString("email")),
                         Map.entry("name", result.getString("display_name")),
                         Map.entry("starts_at", start), Map.entry("ends_at", end),
+                        Map.entry("current_key_id", java.util.Objects.toString(
+                                result.getObject("current_key_id", UUID.class), "")),
                         Map.entry("status", revoked != null ? "revoked"
                                 : !end.isAfter(now) ? "expired" : start.isAfter(now) ? "scheduled" : "active")));
             }

@@ -230,10 +230,13 @@ public class CredentialVerificationService {
     private String authorityStatus(Subject subject, Receipt issuance, boolean keyPresent) {
         if (!keyPresent || !"ACHIEVEMENT_ISSUED".equals(issuance.eventType())) return "unknown";
         if (!subject.advisorId().equals(issuance.actorId())) return "invalid";
+        // Any of the appointed advisor's verified keys counts if it was valid at signing time,
+        // so rotating a key never invalidates credentials signed before the rotation.
         Integer count = jdbc.queryForObject("""
-                SELECT count(*) FROM appointments a JOIN authority_keys k ON k.id = a.advisor_key_id
+                SELECT count(*) FROM appointments a
+                JOIN authority_keys k ON k.user_id = a.user_id AND k.purpose = 'advisor'
                 WHERE a.club_id = ? AND a.user_id = ? AND a.position = 'faculty_advisor'
-                  AND a.advisor_key_id = ? AND a.starts_at <= ? AND a.ends_at > ?
+                  AND k.id = ? AND a.starts_at <= ? AND a.ends_at > ?
                   AND (a.revoked_at IS NULL OR a.revoked_at > ?)
                   AND k.created_at <= ? AND (k.revoked_at IS NULL OR k.revoked_at > ?)
                 """, Integer.class, subject.clubId(), subject.advisorId(), issuance.keyId(),

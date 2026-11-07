@@ -249,3 +249,13 @@ button:disabled { opacity: 0.5; cursor: wait; }
   .verifier-card dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .verifier-card dd { margin-bottom: 8px; }
 }
+
+/* Signing-key lifecycle */
+.key-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.key-administration { border-top: 1px solid #dce3df; margin-top: 28px; }
+.key-administration h3 { display: flex; align-items: center; gap: 8px; }
+.recovery-list { list-style: none; padding: 0; }
+.recovery-list li { display: grid; gap: 6px; padding: 14px 0; border-bottom: 1px solid #dce3df; }
+.recovery-list small, .recovery-list span { color: #67716c; font-size: 13px; }
+.recovery-list code { overflow-wrap: anywhere; font-size: 12px; }
+.revocation-review { margin-top: 16px; padding: 14px; border: 1px solid #e6c3c8; border-radius: 6px; background: #fbf3f4; }

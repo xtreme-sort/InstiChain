@@ -276,15 +276,15 @@ public class AdvisorController {
     }
 
     private Key advisorKey(AccessService.ClubAuthority authority) {
-        UUID keyId = authority.appointment().advisorKeyId();
-        if (keyId == null) throw new ApiException(HttpStatus.FORBIDDEN, "Advisor signing authority is inactive.");
+        // Look up the current key, not the appointment's: rotation must not lock advisors out.
         List<Key> keys = jdbc.query("""
                 SELECT id, user_id, public_key FROM authority_keys
-                WHERE id = ? AND purpose = 'advisor' AND revoked_at IS NULL
+                WHERE user_id = ? AND purpose = 'advisor' AND revoked_at IS NULL
+                ORDER BY created_at DESC, id LIMIT 1
                 """, (result, row) -> new Key(result.getObject("id", UUID.class),
-                result.getObject("user_id", UUID.class), result.getBytes("public_key")), keyId);
+                result.getObject("user_id", UUID.class), result.getBytes("public_key")), authority.user().id());
         if (keys.isEmpty() || !keys.getFirst().userId().equals(authority.user().id())) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "Advisor signing authority is inactive.");
+            throw new ApiException(HttpStatus.FORBIDDEN, "Advisor signing authority is inactive. Rotate or recover your signing key.");
         }
         return keys.getFirst();
     }

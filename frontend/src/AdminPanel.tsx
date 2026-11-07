@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Plus, UserCheck } from 'lucide-react'
+import KeyAdministration from './KeyAdministration'
 
-type Advisor = { id: string; name: string; email: string; starts_at: string; ends_at: string; status: string }
+type Advisor = { id: string; name: string; email: string; starts_at: string; ends_at: string; status: string; current_key_id: string }
 type Club = { id: string; name: string; slug: string; description: string | null; advisors: Advisor[] }
 
 async function adminRequest<T>(path: string, body?: object): Promise<T> {
@@ -129,9 +130,11 @@ export default function AdminPanel() {
             <strong>{advisor.name}</strong><span>{advisor.status}</span>
             <span>{advisor.email}</span>
             <span>{new Date(advisor.starts_at).toLocaleDateString()} to {new Date(advisor.ends_at).toLocaleDateString()}</span>
+            {advisor.current_key_id && <small>Signing key <code>{advisor.current_key_id}</code></small>}
           </div>) : <p>No advisor appointed.</p>}
         </li>)}
       </ul>
+      <KeyAdministration />
     </section>
   )
 }

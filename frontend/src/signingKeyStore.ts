@@ -95,9 +95,23 @@ async function requestServerKey(method: 'GET' | 'POST', publicKey?: string): Pro
   return body as ServerKey
 }
 
+function pendingId(userId: string): string { return `${userId}:pending` }
+
+/** A replacement key is held as pending until the server confirms it, so a failed save can't lock the user out. */
+async function promotePending(userId: string, serverKey: string | undefined): Promise<StoredIdentity | undefined> {
+  const pending = await loadSigningIdentity(pendingId(userId))
+  if (!pending || !serverKey || pending.publicKey !== serverKey) return undefined
+  await saveSigningIdentity(userId, { publicKey: pending.publicKey, privateKey: pending.privateKey })
+  await withStore('readwrite', (store) => store.delete(pendingId(userId)))
+  return { ...pending, userId }
+}
+
 async function provision(userId: string): Promise<SigningIdentityStatus> {
   let server = await requestServerKey('GET')
   let local = await loadSigningIdentity(userId)
+  if (server.registered && local?.publicKey !== server.public_key) {
+    local = await promotePending(userId, server.public_key) ?? local
+  }
 
   if (!server.registered) {
     if (!local) {
@@ -140,4 +154,51 @@ export async function signPreparedPayload(userId: string, payload: string): Prom
     decodeBase64(payload),
   )
   return encodeBase64(new Uint8Array(signature))
+}
+
+async function signWith(privateKey: CryptoKey, bytes: Uint8Array<ArrayBuffer>): Promise<string> {
+  return encodeBase64(new Uint8Array(await window.crypto.subtle.sign({ name: 'Ed25519' }, privateKey, bytes)))
+}
+
+async function postKeyApi<T>(path: string, body: object): Promise<T> {
+  const response = await fetch(`/api/keys/${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  })
+  const data = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : 'The key change failed.')
+  return data as T
+}
+
+/**
+ * Replaces the current key. The old key signs the rotation and the new key signs the
+ * same bytes to prove possession; the new private key never leaves the browser.
+ */
+export async function rotateSigningKey(userId: string): Promise<void> {
+  const current = await loadSigningIdentity(userId)
+  if (!current?.privateKey) throw new Error('Your current private key is unavailable on this device. Request a recovery instead.')
+  const next = await generateSigningIdentity()
+  await saveSigningIdentity(pendingId(userId), next)
+  const prepared = await postKeyApi<{ document: object; signing_payload: string }>(
+    'rotation/prepare', { new_public_key: next.publicKey })
+  const bytes = decodeBase64(prepared.signing_payload)
+  await postKeyApi('rotation', {
+    document: prepared.document,
+    signature: await signWith(current.privateKey, bytes),
+    new_key_signature: await signWith(next.privateKey, bytes),
+  })
+  await promotePending(userId, next.publicKey)
+  provisioning.delete(userId)
+}
+
+/** Asks an administrator to approve a fresh key after the old device was lost. */
+export async function requestKeyRecovery(userId: string): Promise<{ id: string; expires_at: string }> {
+  const next = await generateSigningIdentity()
+  await saveSigningIdentity(pendingId(userId), next)
+  // Must match the server's canonical JSON: sorted keys, no whitespace.
+  const proof = JSON.stringify({ public_key: next.publicKey, purpose: 'instichain-key-recovery', user_id: userId })
+  return postKeyApi('recovery-requests', {
+    public_key: next.publicKey,
+    proof: await signWith(next.privateKey, new TextEncoder().encode(proof) as Uint8Array<ArrayBuffer>),
+  })
 }

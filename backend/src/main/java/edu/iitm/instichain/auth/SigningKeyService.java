@@ -39,6 +39,14 @@ public class SigningKeyService {
 
     public SigningKey register(UUID userId, String encodedPublicKey) {
         byte[] publicKey = decodePublicKey(encodedPublicKey);
+        Boolean retired = jdbc.queryForObject("""
+                SELECT EXISTS(SELECT 1 FROM user_signing_keys WHERE public_key = ? AND revoked_at IS NOT NULL)
+                    OR EXISTS(SELECT 1 FROM authority_keys WHERE public_key = ? AND revoked_at IS NOT NULL)
+                """, Boolean.class, publicKey, publicKey);
+        if (Boolean.TRUE.equals(retired)) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "This signing key was retired and cannot be registered again. Request a key recovery.");
+        }
         Optional<SigningKey> existing = findActive(userId);
         if (existing.isPresent()) {
             if (MessageDigest.isEqual(existing.get().publicKey(), publicKey)) return existing.get();

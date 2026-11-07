@@ -31,6 +31,7 @@ public final class InstiChainContract implements ContractInterface {
     private static final String HEAD_KEY = "ledger:head";
     private static final String REVOCATION_PREFIX = "revocation:";
     private static final String CREDENTIAL_PREFIX = "credential:";
+    private static final String REVOKED_KEY_PREFIX = "revoked-key:";
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Map<String, String> REVOCATION_SUBJECTS = Map.of(
             "ROLE_REVOKED", "appointment_id",
@@ -86,6 +87,12 @@ public final class InstiChainContract implements ContractInterface {
             }
         }
 
+        String actorKeyId = request.path("actor_key_id").asText();
+        if (hasBytes(context.getStub().getState(REVOKED_KEY_PREFIX + actorKeyId))) {
+            throw fail("actor_key_id " + actorKeyId + " has been revoked and cannot sign new events");
+        }
+        List<String> revokedKeys = keysRevokedBy(context, eventType, request.path("object_ids"), actorKeyId);
+
         byte[] headBytes = context.getStub().getState(HEAD_KEY);
         long sequence = hasBytes(headBytes)
                 ? parseObject(new String(headBytes, StandardCharsets.UTF_8), "ledger head").path("sequence").asLong() + 1
@@ -128,6 +135,9 @@ public final class InstiChainContract implements ContractInterface {
             revocation.put("revoked_at", event.path("committed_at").asText());
             context.getStub().putState(REVOCATION_PREFIX + subjectId,
                     stringify(revocation).getBytes(StandardCharsets.UTF_8));
+        }
+        for (String revokedKey : revokedKeys) {
+            context.getStub().putState(REVOKED_KEY_PREFIX + revokedKey, requestId.getBytes(StandardCharsets.UTF_8));
         }
         ObjectNode head = JSON.createObjectNode();
         head.put("sequence", sequence);
@@ -231,6 +241,42 @@ public final class InstiChainContract implements ContractInterface {
 
     private static boolean hasBytes(byte[] value) {
         return value != null && value.length > 0;
+    }
+
+    /** Validates a key-lifecycle event and returns the keys it retires; empty for other events. */
+    private List<String> keysRevokedBy(Context context, String eventType, JsonNode objects, String actorKeyId) {
+        List<String> revoked = new ArrayList<>();
+        if ("KEY_ROTATED".equals(eventType)) {
+            String oldKey = objects.path("old_key_id").asText();
+            requireUuid(oldKey, "KEY_ROTATED requires object_ids.old_key_id as a lowercase UUID");
+            if (!oldKey.equals(actorKeyId)) throw fail("KEY_ROTATED must be signed by the key it retires");
+            revoked.add(oldKey);
+        } else if ("KEY_REVOKED".equals(eventType)) {
+            String key = objects.path("key_id").asText();
+            requireUuid(key, "KEY_REVOKED requires object_ids.key_id as a lowercase UUID");
+            if (hasBytes(context.getStub().getState(REVOKED_KEY_PREFIX + key))) {
+                throw fail("key_id " + key + " is already revoked");
+            }
+            revoked.add(key);
+        } else if ("KEY_RECOVERED".equals(eventType)) {
+            if (!objects.path("revoked_key_ids").isArray()) {
+                throw fail("KEY_RECOVERED requires object_ids.revoked_key_ids");
+            }
+            for (JsonNode key : objects.path("revoked_key_ids")) {
+                requireUuid(key.asText(), "revoked_key_ids must contain lowercase UUIDs");
+                revoked.add(key.asText());
+            }
+        } else {
+            return revoked;
+        }
+        String newKey = objects.path("new_key_id").asText();
+        if (!"KEY_REVOKED".equals(eventType)) {
+            requireUuid(newKey, eventType + " requires object_ids.new_key_id as a lowercase UUID");
+            if (revoked.contains(newKey) || hasBytes(context.getStub().getState(REVOKED_KEY_PREFIX + newKey))) {
+                throw fail("a revoked key cannot be reinstated");
+            }
+        }
+        return revoked;
     }
 
     private boolean credentialExists(Context context, String credentialId) {

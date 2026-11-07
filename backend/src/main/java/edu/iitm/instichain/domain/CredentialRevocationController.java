@@ -143,14 +143,15 @@ public class CredentialRevocationController {
     }
 
     private Key advisorKey(AccessService.ClubAuthority advisor) {
-        UUID keyId = advisor.appointment().advisorKeyId();
-        List<Key> keys = keyId == null ? List.of() : jdbc.query("""
+        // Look up the current key, not the appointment's: rotation must not lock advisors out.
+        List<Key> keys = jdbc.query("""
                 SELECT id, user_id, public_key FROM authority_keys
-                WHERE id = ? AND purpose = 'advisor' AND revoked_at IS NULL
+                WHERE user_id = ? AND purpose = 'advisor' AND revoked_at IS NULL
+                ORDER BY created_at DESC, id LIMIT 1
                 """, (row, number) -> new Key(row.getObject("id", UUID.class),
-                row.getObject("user_id", UUID.class), row.getBytes("public_key")), keyId);
+                row.getObject("user_id", UUID.class), row.getBytes("public_key")), advisor.user().id());
         if (keys.isEmpty() || !advisor.user().id().equals(keys.getFirst().userId())) {
-            throw new ApiException(HttpStatus.FORBIDDEN, "Advisor signing authority is inactive.");
+            throw new ApiException(HttpStatus.FORBIDDEN, "Advisor signing authority is inactive. Rotate or recover your signing key.");
         }
         return keys.getFirst();
     }
