@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy, KeyRound, RefreshCw } from 'lucide-react'
-import { loadOrProvisionSigningIdentity } from './signingIdentity'
-import type { SigningIdentityStatus } from './signingIdentity'
+import { loadOrProvisionSigningIdentity } from './signingKeyStore'
+import type { SigningIdentityStatus } from './signingKeyStore'
 
 type Props = { userId: string }
 

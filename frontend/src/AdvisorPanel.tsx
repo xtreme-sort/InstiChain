@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { RotateCcw, UserPlus } from 'lucide-react'
-import { signPreparedPayload } from './signingIdentity'
+import { signPreparedPayload } from './signingKeyStore'
 import IssuancePanel from './IssuancePanel'
 
 type Club = {

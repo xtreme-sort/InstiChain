@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { CheckCircle2, LogOut, Mail, ShieldCheck } from 'lucide-react'
 import SigningIdentity from './SigningIdentity'
-import { generateSigningIdentity, saveSigningIdentity } from './signingIdentity'
+import { generateSigningIdentity, saveSigningIdentity } from './signingKeyStore'
 
 export type Account = { id: string; email: string; display_name: string }
 type ConfirmResult = { message: string; account: Account }

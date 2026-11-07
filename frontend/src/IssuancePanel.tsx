@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BadgeCheck } from 'lucide-react'
 import { apiRequest, postJson } from './api'
-import { signPreparedPayload } from './signingIdentity'
+import { signPreparedPayload } from './signingKeyStore'
 import type { Competition } from './CompetitionPanel'
 import type { Submission } from './ResultPanel'
 
