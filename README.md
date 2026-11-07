@@ -26,6 +26,7 @@ frontend/                React and TypeScript browser client
 scripts/                 Development and Fabric lifecycle commands
 docs/ARCHITECTURE.md     System design and source-code map
 docs/DEMO.md             Demo runbook, troubleshooting, production assumptions
+docs/STAKEHOLDER_DEMO_MANUAL.md  Click-by-click stakeholder demonstration guide
 docs/SECURITY.md         Security review and known limitations
 docs/KEY_LIFECYCLE.md    Signing-key rotation, recovery and compromise policy
 docs/LEDGER_AUDIT.md     Fabric checkpoints and projection audit

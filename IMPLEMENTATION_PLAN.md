@@ -1,10 +1,22 @@
 # InstiChain Implementation Plan
 
-This is the implementation plan for the current **Java/Spring Boot + Hyperledger Fabric** repository. It replaces the older FastAPI-based plan. Complete the commits in order; each prompt is intended to be pasted as a separate coding request. Do not commit automatically unless asked.
+This is the implementation and verification record for the current **Java/Spring Boot + Hyperledger Fabric** repository. It replaces the older FastAPI-based plan. The commit prompts below are retained as the intended scope of each milestone; their code landing does not by itself prove every acceptance criterion. Do not commit automatically unless asked.
 
 ## Progress
 
-All planned commits, **1.1 through 5.4, are implemented**. The chaincode changes in 2.2 and 5.1 require `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; see `fabric/README.md`. Still outstanding: a run of `make e2e` and the load test against a live Fabric network, and a manual pass through the screens. Current results are in `docs/DEMO.md`.
+**Status checked 7 November 2026:** all 20 planned feature/release commits, **1.1 through 5.4, have landed in code**, through `3310fd7`. This does **not** mean the project has passed final acceptance. The 5.3 HTTP-API end-to-end script and 5.4 load-test script exist but have not run against a live Fabric network; the requested browser end-to-end test does not exist. Frontend component tests and mobile/desktop screenshot checks requested in several UI commits are also absent. See the verification gaps below.
+
+| Milestones | Code status | Acceptance status |
+| --- | --- | --- |
+| 1.1-2.4: application UI and credential lifecycle | Implemented | Backend checks pass; no automated frontend component/browser suite |
+| 3.1-3.4: private proof archive and Drive | Implemented | Mocked tests pass; live Google OAuth/import and Docker-backed migration check pending |
+| 4.1-4.3: sharing and public verifier APIs | Implemented | Unit/controller tests pass; live Fabric-backed verification pending |
+| 4.4: sharing and verifier UI | Implemented | TypeScript/build passes; create/copy/revoke browser flows and responsive screenshots pending |
+| 5.1-5.2: key lifecycle and ledger audit | Implemented | Unit tests pass; live rotation, checkpoint, and projection audit pending |
+| 5.3: recovery and end-to-end | Rebuild tool and HTTP-API script implemented | Live `make e2e` not run; script is **not** a browser test |
+| 5.4: release hardening and performance | Security review, demo notes, and load script implemented | 50-concurrent-user measurements and live release checks pending |
+
+The chaincode changes in 2.2 and 5.1 require `make fabric-refresh FABRIC_SEQUENCE=N` on an already-deployed Java chaincode definition; use the **next** sequence only after checking the current deployment (see `fabric/README.md`).
 
 ## What Is Implemented Now
 
@@ -12,7 +24,7 @@ All planned commits, **1.1 through 5.4, are implemented**. The chaincode changes
 | --- | --- | --- |
 | Startup and configuration | Spring Boot API, React frontend, PostgreSQL/Mailpit Compose services, Fabric test-network scripts, Make targets | `backend/`, `frontend/`, `compose.yaml`, `Makefile`, `scripts/` |
 | Email login | Institute-domain validation, single-use expiring email links, persistent cookie sessions, logout | `backend/src/main/java/edu/iitm/instichain/auth/` |
-| Signing identity | Browser-generated Ed25519 key in IndexedDB; public key registered with the API; local signing for advisor role actions | `frontend/src/signingIdentity.ts`, `frontend/src/SigningIdentity.tsx`, `backend/src/main/java/edu/iitm/instichain/auth/SigningKeyController.java` |
+| Signing identity | Browser-generated Ed25519 key in IndexedDB; public key registered with the API; local signing for advisor actions | `frontend/src/signingKeyStore.ts`, `frontend/src/SigningIdentity.tsx`, `backend/src/main/java/edu/iitm/instichain/auth/SigningKeyController.java` |
 | Administration | Controlled CLI bootstrap, club creation, advisor appointment, admin UI | `backend/src/main/java/edu/iitm/instichain/cli/`, `backend/src/main/java/edu/iitm/instichain/domain/AdminController.java`, `frontend/src/AdminPanel.tsx` |
 | Advisor roles | Advisor club list, signed club-head/office-bearer grants and revocations, advisor UI | `backend/src/main/java/edu/iitm/instichain/domain/AdvisorController.java`, `frontend/src/AdvisorPanel.tsx` |
 | Competitions and results | Backend APIs and officer UI for competition creation, result submission and immutable result versions | `CompetitionController.java`, `ResultController.java`, `frontend/src/CompetitionPanel.tsx`, `frontend/src/ResultPanel.tsx` |
@@ -20,9 +32,25 @@ All planned commits, **1.1 through 5.4, are implemented**. The chaincode changes
 | Credential lifecycle | Student list/detail/vault, signed revocation API, historical verification and history APIs | `StudentCredentialController.java`, `CredentialRevocationController.java`, `CredentialVerificationService.java`, `frontend/src/CredentialVault.tsx` |
 | Fabric ledger | Java chaincode, direct Fabric Gateway client, confirmed-write receipts, event and revocation inspection endpoints | `fabric/chaincode/`, `backend/src/main/java/edu/iitm/instichain/fabric/` |
 | Proof storage | Private proof archive, Google Drive OAuth/import, server-side SHA-256 binding, proof-health checks and UI | `backend/src/main/java/edu/iitm/instichain/storage/`, `frontend/src/ProofLibrary.tsx` |
-| Selective sharing | Student-owned hashed share tokens, bounded expiry, authenticated create/list/revoke APIs | `backend/src/main/java/edu/iitm/instichain/sharing/` |
+| Selective sharing and public verification | Student-owned hashed share tokens, create/list/revoke APIs, live public verification API, share/QR and verifier UI | `backend/src/main/java/edu/iitm/instichain/sharing/`, `frontend/src/ShareManager.tsx`, `frontend/src/PublicVerifier.tsx` |
+| Signing-key lifecycle | Possession-based rotation, administrator-approved recovery, historical public keys, browser key administration | `backend/src/main/java/edu/iitm/instichain/keys/`, `frontend/src/KeyAdministration.tsx`, `docs/KEY_LIFECYCLE.md` |
+| Ledger assurance and recovery | Signed checkpoints, projection audit, guarded rebuild of replayable records, backup guide | `backend/src/main/java/edu/iitm/instichain/audit/`, `docs/LEDGER_AUDIT.md`, `docs/RECOVERY.md` |
+| Release checks | API end-to-end and verification load scripts, security and demo notes | `scripts/e2e.mjs`, `scripts/load-verify.mjs`, `docs/SECURITY.md`, `docs/DEMO.md` |
 
-The repository currently has **no Ethereum runtime**. Existing unit tests and builds have passed, but a full browser-to-Fabric end-to-end run has not been demonstrated by the test suite.
+The repository has **no Ethereum runtime**. The current end-to-end script exercises HTTP APIs with WebCrypto signatures; it does not automate the React screens. No full browser-to-Fabric pass has been demonstrated.
+
+## Verification And Remaining Work
+
+Local checks on 7 November 2026: backend `./mvnw -q test` ran **84 tests: 83 passed, 1 skipped** (the Flyway/Testcontainers migration test needs Docker); Java chaincode Gradle tests passed **8 tests**; `npm ci` followed by `npm run build` passed. Docker was inaccessible from this environment, so these checks do not establish a working integrated deployment.
+
+1. Start Docker, PostgreSQL, Mailpit, and Fabric. Run the skipped migration test and `make e2e` against a configured backend. Record the actual results in `docs/DEMO.md`. The existing script tests the HTTP API, not the browser.
+2. Exercise the full React workflow manually on desktop and mobile, then add automated component/browser tests for role navigation, result entry, issuance, key recovery, sharing, and public verification. Capture mobile/desktop screenshots and check for overlap and failure states.
+3. Configure Google OAuth test credentials and a test account; verify connect, import, archive integrity, provider disconnection, and proof-health states against the live service.
+4. Run `scripts/load-verify.mjs` against valid share tokens with `LOAD_CONCURRENCY=50`, adjusting the test-only verification rate limit as its instructions require. Record measured p50, p95, error rate, and environment; do not present the design target as a result.
+5. Validate key rotation/recovery, checkpoint verification, projection audit, and guarded rebuild on a live Fabric deployment. Keep production deployment assumptions separate from what the one-machine test network proves.
+6. Update the current `report-template.tex` draft before submission: it was written before commits 4.3-5.4 and still says public verification is pending. Confirm its stakeholder, contribution, Docker-image, and final-SHA fields rather than inventing them.
+
+These are **verification and release tasks**, not six more feature commits. A separate single-image Docker submission artifact, if required by the course, is not provided by this repository and must be built and tested separately.
 
 ## Architecture Rules
 
@@ -166,8 +194,8 @@ Implement a guarded dry-run/rebuild tool for only those institutional projection
 Audit Spring Boot cookies/origins/CSRF, rate limits, request sizes, secret logging, dependency configuration, Fabric availability behavior, and frontend error handling. Add realistic load-test fixtures and measure 50 concurrent public verifications, reporting p50/p95/error rate only from actual runs. Finish setup, troubleshooting, backup, production deployment assumptions, and professor-demo instructions; document that local Fabric peers are not independent production organizations. Run backend, chaincode, frontend, E2E, and load tests where available, recording exact results and limitations. Do not commit automatically; give targeted git add, a full quoted git commit command, and git push. Title: chore(release): harden and document InstiChain
 ```
 
-## Before Each Commit
+## For Follow-up Changes
 
 1. Review `git status --short` and keep unrelated changes intact.
 2. Run the tests for touched backend, chaincode, and frontend modules; add integration tests for cross-layer behavior.
-3. Inspect `git diff --cached` before committing. Stage only the intended files and push each finished commit before starting the next one.
+3. Inspect `git diff --cached` before committing. Stage only the intended files, then push only after the change is reviewed.

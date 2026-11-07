@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-refresh fabric-down fabric-test backend-test frontend-test test e2e
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit show fabric-install fabric-up fabric-upgrade fabric-refresh fabric-down fabric-test backend-test frontend-test test e2e
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
@@ -15,6 +15,7 @@ help:
 	@echo "make stop-backend   Stop only this project's backend"
 	@echo "make stop-mailpit   Stop Mailpit while preserving its configuration"
 	@echo "make status         Show app, database, mail, and Fabric status"
+	@echo "make show           Show ledger health, recent events, and revocations"
 	@echo "make status-mailpit Show the Mailpit container status"
 	@echo "make fabric-install Download pinned Fabric runtime and samples"
 	@echo "make fabric-up      Start two-organization Fabric and deploy chaincode"
@@ -89,6 +90,15 @@ status:
 	else \
 		echo "Docker is stopped or inaccessible; database, Mailpit, and Fabric cannot be checked."; \
 	fi
+
+show:
+	@command -v jq >/dev/null 2>&1 || { echo "Install jq to format ledger output." >&2; exit 1; }
+	@echo "Ledger health"
+	@curl --fail --silent --show-error http://127.0.0.1:8000/api/ledger/health | jq
+	@echo "Recent ledger events"
+	@curl --fail --silent --show-error 'http://127.0.0.1:8000/api/ledger/events?start_sequence=1&limit=50' | jq
+	@echo "Recorded revocations"
+	@curl --fail --silent --show-error http://127.0.0.1:8000/api/ledger/revocations | jq
 
 status-mailpit:
 	@docker compose ps mailpit

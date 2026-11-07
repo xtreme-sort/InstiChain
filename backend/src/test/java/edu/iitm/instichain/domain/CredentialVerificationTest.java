@@ -2,6 +2,8 @@ package edu.iitm.instichain.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +18,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 class CredentialVerificationTest {
+    @Test
+    void acceptsFabricNanosecondsRoundedToPostgresMicroseconds() {
+        assertTrue(CredentialVerificationService.matchesPersistedTimestamp(
+                "2026-11-07T12:01:25.407964536Z",
+                OffsetDateTime.parse("2026-11-07T12:01:25.407965Z")));
+        assertFalse(CredentialVerificationService.matchesPersistedTimestamp(
+                "2026-11-07T12:01:25.407964536Z",
+                OffsetDateTime.parse("2026-11-07T12:01:25.407964Z")));
+    }
+
     @Test
     void missingReceiptIsUnknownRatherThanValid() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);

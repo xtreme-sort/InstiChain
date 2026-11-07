@@ -9,7 +9,9 @@ import edu.iitm.instichain.fabric.FabricService;
 import edu.iitm.instichain.fabric.FabricUnavailableException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
@@ -187,14 +189,21 @@ public class CredentialVerificationService {
                     && event.path("signature").asText().equals(Base64.getEncoder().encodeToString(receipt.signature()))
                     && event.path("object_ids").equals(unsigned(receipt).path("object_ids"))
                     && event.path("payload").equals(unsigned(receipt).path("payload"))
-                    && OffsetDateTime.parse(event.path("committed_at").asText())
-                            .isEqual(receipt.committedAt())
+                    && matchesPersistedTimestamp(event.path("committed_at").asText(), receipt.committedAt())
                     ? "confirmed" : "mismatch";
         } catch (FabricUnavailableException error) {
             return "unavailable";
         } catch (RuntimeException error) {
             return "mismatch";
         }
+    }
+
+    /** PostgreSQL rounds TIMESTAMPTZ values to microseconds; Fabric retains nanoseconds. */
+    static boolean matchesPersistedTimestamp(String fabricValue, OffsetDateTime persistedValue) {
+        if (persistedValue == null) return false;
+        Instant fabricInstant = OffsetDateTime.parse(fabricValue).toInstant();
+        Instant postgresInstant = fabricInstant.plusNanos(500).truncatedTo(ChronoUnit.MICROS);
+        return postgresInstant.equals(persistedValue.toInstant());
     }
 
     private boolean issuanceLinksSubject(Subject subject, Receipt issuance) {
