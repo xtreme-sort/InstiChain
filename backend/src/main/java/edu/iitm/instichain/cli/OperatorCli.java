@@ -51,6 +51,12 @@ public final class OperatorCli {
                 }
                 return;
             }
+            if ((args.length == 1 || (args.length == 2 && "--apply".equals(args[1]))) && "rebuild".equals(args[0])) {
+                try (ConfigurableApplicationContext context = applicationContext()) {
+                    rebuild(context, args.length == 2);
+                }
+                return;
+            }
             if (args.length == 1 && "audit".equals(args[0])) {
                 try (ConfigurableApplicationContext context = applicationContext()) {
                     if (!audit(context)) System.exit(1);
@@ -126,6 +132,24 @@ public final class OperatorCli {
         return result.outcome() == LedgerCheckpoint.Outcome.VALID;
     }
 
+    private static void rebuild(ConfigurableApplicationContext context, boolean apply) {
+        AuditService audit = context.getBean(AuditService.class);
+        var plan = audit.rebuildPlan();
+        System.out.println((apply ? "Applying" : "Dry run:") + " " + plan.actions().size()
+                + " missing row(s) can be restored from Fabric.");
+        plan.actions().forEach(action -> System.out.println("  " + action.operation() + "  " + action.subjectId()));
+        if (!plan.skipped().isEmpty()) {
+            System.out.println(plan.skipped().size() + " event(s) cannot be fully restored from Fabric:");
+            plan.skipped().forEach(skip -> System.out.println("  " + skip.eventType() + "  " + skip.requestId()
+                    + "  " + skip.reason()));
+        }
+        if (!apply) {
+            System.out.println("Nothing was changed. Re-run with --apply after restoring the PostgreSQL backup.");
+            return;
+        }
+        System.out.println(audit.applyRebuild(plan) + " row(s) written. Run the audit command to confirm.");
+    }
+
     private static boolean audit(ConfigurableApplicationContext context) {
         var findings = context.getBean(AuditService.class).audit();
         if (findings.isEmpty()) {
@@ -144,6 +168,7 @@ public final class OperatorCli {
         System.err.println("   or: OperatorCli checkpoint <audit-key.pem> <output.json>");
         System.err.println("   or: OperatorCli verify-checkpoint <checkpoint.json> <trusted-audit-public-key>");
         System.err.println("   or: OperatorCli audit");
+        System.err.println("   or: OperatorCli rebuild [--apply]");
         System.err.println("   or: OperatorCli smtp [institute-recipient]");
         System.err.println("   or: OperatorCli drive");
     }

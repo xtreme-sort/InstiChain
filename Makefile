@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-refresh fabric-down fabric-test backend-test frontend-test test
+.PHONY: help docker status-docker database status-database stop-database frontend backend mailpit stop stop-frontend stop-backend stop-mailpit status status-mailpit fabric-install fabric-up fabric-upgrade fabric-refresh fabric-down fabric-test backend-test frontend-test test e2e
 
 help:
 	@echo "make docker         Start the Docker daemon on Linux"
@@ -22,6 +22,7 @@ help:
 	@echo "make fabric-refresh FABRIC_SEQUENCE=N Upgrade an existing Java chaincode definition"
 	@echo "make fabric-down    Delete the local Fabric network and ledger"
 	@echo "make test           Run backend, chaincode, and frontend checks"
+	@echo "make e2e            Run the end-to-end workflow against a running stack"
 
 docker:
 	@if docker info >/dev/null 2>&1; then \
@@ -117,3 +118,6 @@ frontend-test:
 	@cd frontend && npm run build
 
 test: backend-test fabric-test frontend-test
+
+e2e:
+	@node scripts/e2e.mjs
