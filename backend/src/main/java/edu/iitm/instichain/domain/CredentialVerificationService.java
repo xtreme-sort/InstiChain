@@ -32,7 +32,7 @@ public class CredentialVerificationService {
         this.statuses = statuses;
     }
 
-    record Subject(UUID id, UUID recipientId, UUID clubId, UUID advisorId,
+    public record Subject(UUID id, UUID recipientId, UUID clubId, UUID advisorId,
                    UUID issuanceId, OffsetDateTime issuedAt, OffsetDateTime revokedAt,
                    UUID revocationId, boolean superseded) {}
     record Receipt(UUID requestId, String source, Long sequence, String fabricId,

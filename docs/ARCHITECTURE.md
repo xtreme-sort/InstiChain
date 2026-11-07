@@ -43,6 +43,28 @@ institutional records are never written to it.
 
 If Fabric does not confirm the event, the PostgreSQL domain change rolls back.
 
+## Public verification
+
+A student creates a share link for selected credentials. A verifier needs no
+account: `POST /api/public/verification` with `{"token": "..."}` re-runs the
+shared credential verifier on every call, so a revocation recorded after the link
+was created is reported immediately.
+
+- The token travels in the request body and the verifier page reads it from the
+  URL fragment, so it never reaches access logs or `Referer` headers. Only its
+  SHA-256 hash is stored, and share tokens are never written to Fabric.
+- Unknown, expired, and revoked links return the same `404` response.
+- Responses carry the recipient's display name, award, competition, club, issuer,
+  and Fabric reference, but no email addresses, internal paths, or storage
+  provider details. Proof status is reduced to `verified`, `digest_only`,
+  `unchecked`, or `unavailable`.
+- Each credential reports authenticity, ledger status, historical authorization,
+  and lifecycle separately, plus a `verdict` that is `valid` only when all of them
+  pass. A Fabric outage yields `unknown`, never `valid`.
+- Responses are `no-store`, and each client address is limited to 30 requests
+  per minute. That limit is held in process memory, so a multi-instance
+  deployment must also rate-limit at the reverse proxy.
+
 ## Code map
 
 ```text
