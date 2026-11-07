@@ -1,6 +1,8 @@
 package edu.iitm.instichain.cli;
 
 import edu.iitm.instichain.InstiChainApplication;
+import edu.iitm.instichain.audit.AuditService;
+import edu.iitm.instichain.audit.LedgerCheckpoint;
 import edu.iitm.instichain.auth.MailService;
 import edu.iitm.instichain.common.Ed25519;
 import edu.iitm.instichain.config.InstiChainProperties;
@@ -34,6 +36,24 @@ public final class OperatorCli {
                 try (ConfigurableApplicationContext context = applicationContext()) {
                     UUIDPrinter.print(context.getBean(AdminBootstrapService.class)
                             .bootstrap(args[1], args[2]));
+                }
+                return;
+            }
+            if (args.length == 3 && "checkpoint".equals(args[0])) {
+                try (ConfigurableApplicationContext context = applicationContext()) {
+                    checkpoint(context, Path.of(args[1]), Path.of(args[2]));
+                }
+                return;
+            }
+            if (args.length == 3 && "verify-checkpoint".equals(args[0])) {
+                try (ConfigurableApplicationContext context = applicationContext()) {
+                    if (!verifyCheckpoint(context, Path.of(args[1]), args[2])) System.exit(1);
+                }
+                return;
+            }
+            if (args.length == 1 && "audit".equals(args[0])) {
+                try (ConfigurableApplicationContext context = applicationContext()) {
+                    if (!audit(context)) System.exit(1);
                 }
                 return;
             }
@@ -81,9 +101,49 @@ public final class OperatorCli {
                 + Base64.getEncoder().encodeToString(Ed25519.rawPublic(pair.getPrivate())));
     }
 
+    private static void checkpoint(ConfigurableApplicationContext context, Path key, Path output) throws Exception {
+        if (Files.exists(output)) throw new IllegalArgumentException("Refusing to overwrite existing checkpoint: " + output);
+        AuditService audit = context.getBean(AuditService.class);
+        LedgerCheckpoint.Checkpoint checkpoint = LedgerCheckpoint.create(audit.fabricEvents(), audit.channel(),
+                audit.chaincode(), java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).toString(),
+                Ed25519.readPrivateKey(key), audit.json());
+        Files.writeString(output, context.getBean(ObjectMapper.class).writerWithDefaultPrettyPrinter()
+                .writeValueAsString(checkpoint) + System.lineSeparator(), StandardCharsets.UTF_8);
+        System.out.println("Checkpoint written: " + output.toAbsolutePath());
+        System.out.println("Sequence " + checkpoint.sequence() + ", chain hash " + checkpoint.chainHash());
+        System.out.println("Store it with a custodian outside this server.");
+    }
+
+    private static boolean verifyCheckpoint(ConfigurableApplicationContext context, Path file, String trustedKey)
+            throws Exception {
+        AuditService audit = context.getBean(AuditService.class);
+        LedgerCheckpoint.Checkpoint checkpoint = context.getBean(ObjectMapper.class)
+                .readValue(Files.readString(file), LedgerCheckpoint.Checkpoint.class);
+        LedgerCheckpoint.Verification result = LedgerCheckpoint.verify(checkpoint, audit.fabricEvents(),
+                trustedKey, audit.json());
+        System.out.println("Outcome: " + result.outcome() + " (checkpoint sequence " + result.checkpointSequence()
+                + ", ledger sequence " + result.ledgerSequence() + ")");
+        return result.outcome() == LedgerCheckpoint.Outcome.VALID;
+    }
+
+    private static boolean audit(ConfigurableApplicationContext context) {
+        var findings = context.getBean(AuditService.class).audit();
+        if (findings.isEmpty()) {
+            System.out.println("Audit passed: every Fabric event has a matching receipt, projection and signature.");
+            return true;
+        }
+        System.out.println(findings.size() + " finding(s):");
+        findings.forEach(finding -> System.out.println("  " + finding.kind() + "  " + finding.eventType()
+                + "  " + finding.requestId() + "  " + finding.detail()));
+        return false;
+    }
+
     private static void usage() {
         System.err.println("Usage: OperatorCli keygen <output.pem>");
         System.err.println("   or: OperatorCli admin <institute-email> <verification-reference>");
+        System.err.println("   or: OperatorCli checkpoint <audit-key.pem> <output.json>");
+        System.err.println("   or: OperatorCli verify-checkpoint <checkpoint.json> <trusted-audit-public-key>");
+        System.err.println("   or: OperatorCli audit");
         System.err.println("   or: OperatorCli smtp [institute-recipient]");
         System.err.println("   or: OperatorCli drive");
     }
